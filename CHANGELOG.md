@@ -4,30 +4,59 @@
 
 ### Clean break: Alpha-SPY
 
-Alpha-SPY is a standalone product, not an upgrade to any previous trading
-application. All legacy identity and migration logic is gone.
+Alpha-SPY is a standalone product. It is not an upgrade to, and shares no
+identity or data with, any previous trading application. This release removes
+all prior naming and every trace of migration logic.
 
-- Package `spy_der` renamed to `alpha_spy`; CLI `spy-der` to `alpha-spy`;
-  distribution to `alpha-spy`.
-- Paths moved to `/opt/alpha-spy`, `/etc/alpha-spy`, `/var/lib/alpha-spy`,
-  `/var/log/alpha-spy`; service account `alphaspy`.
-- All eleven systemd units renamed into `alpha-spy-*`.
-- Databases are `alpha-spy.db` and `command-center.sqlite`; the `-v2` suffixes,
-  which existed only to avoid clobbering a previous system's files, are gone.
-- Environment variables `SPY_DER_*` renamed to `ALPHA_SPY_*`.
-- Removed every trace of the previous systems: `/var/lib/zerodte` from the
-  backup roots, preflight and support bundle; the old backup unit the installer
-  used to stop and disable; the `pre-v2` install and configuration preservation;
-  and the recovery of credentials from a previous configuration.
-- The installer now assumes a fresh installation and touches only Alpha-SPY
-  paths, units and the `alphaspy` account. It leaves other applications alone.
-- `docs/UPGRADE.md` rewritten: Alpha-SPY upgrade and rollback, no migration.
-- The Dojo is retained in full and renamed into the namespace
-  (`alpha-spy-dojo.service`, `alpha-spy-dojo.timer`, `reports/dojo`,
-  `models/challengers`). This is a namespace cleanup, not a feature reduction.
-- `scripts/check_legacy_identifiers.sh` fails the build if any prohibited
-  identifier reappears; wired into `make lint` and CI static validation.
+Canonical naming throughout:
 
+| | |
+|---|---|
+| Product | Alpha-SPY |
+| Python package | `alpha_spy` |
+| CLI | `alpha-spy` |
+| Distribution | `alpha-spy` |
+| Install root | `/opt/alpha-spy` |
+| Configuration | `/etc/alpha-spy` |
+| State and data | `/var/lib/alpha-spy` |
+| Logs | `/var/log/alpha-spy` |
+| Service account | `alphaspy` |
+| Units | `alpha-spy-*.service`, `alpha-spy-*.timer`, `alpha-spy.target` |
+| Databases | `alpha-spy.db`, `command-center.sqlite` |
+| Environment | `ALPHA_SPY_*` |
+
+Removed rather than adapted:
+
+- A previous product's data root, which the backup, preflight and support
+  bundle used to reach into.
+- The obsolete backup unit the installer used to stop and disable.
+- The preservation of a previous installation tree and a timestamped copy of
+  its configuration under `/var/backups`.
+- The recovery of broker credentials and dashboard tokens from a previous
+  configuration. Every install now issues fresh view, administrator and
+  ingestion tokens, and Tradier is configured afterwards with
+  `configure_tradier.sh`.
+- Database filename suffixes that existed only so a previous system's files
+  would not be overwritten.
+- The previous product's release archives. This repository is not their
+  continuation.
+
+The installer assumes a fresh installation and touches only Alpha-SPY paths,
+units and the `alphaspy` account. It does not inspect, stop, modify or depend
+on any other application on the host. `docs/UPGRADE.md` is rewritten around
+Alpha-SPY's own upgrade and rollback.
+
+The Dojo is retained in full and moved into the namespace
+(`alpha-spy-dojo.service`, `alpha-spy-dojo.timer`, `reports/dojo`,
+`models/challengers`). Constituent intelligence, prediction, options
+valuation, strategy selection, risk control, execution, the confirmation tape,
+continuous audit, champion/challenger, the GUI Command Center and backup are
+all unchanged. This is a namespace cleanup, not a feature reduction.
+
+`scripts/check_legacy_identifiers.sh` fails the build if any prohibited
+identifier reappears anywhere in the repository, and runs in `make lint` and CI
+static validation. It carries no exemptions: this changelog deliberately
+describes the change without naming the identifiers it removed.
 
 ### Correctness fixes
 
