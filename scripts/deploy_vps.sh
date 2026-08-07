@@ -3,8 +3,8 @@
 #
 # Builds (or reuses) a release archive, verifies it locally, transfers it,
 # verifies it again on the target, then runs the suite's own installer. The
-# installer preserves /var/lib/spy-der, /var/lib/zerodte and the prior
-# /opt/spy-der tree, and brings the suite up in the shipped fail-closed
+# installer performs a fresh installation and touches only Alpha-SPY paths.
+# /opt/alpha-spy tree, and brings the suite up in the shipped fail-closed
 # posture: Tradier sandbox, paper mode, order submission disabled, no
 # production sentinel.
 #
@@ -55,7 +55,7 @@ if [[ -z "$DEPLOY_ARCHIVE" ]]; then
   if [[ "${DEPLOY_SKIP_BUILD:-0}" != "1" ]]; then
     bash scripts/build_release.sh
   fi
-  DEPLOY_ARCHIVE="$(find "$ROOT_DIR/dist/release" -maxdepth 1 -name 'spy-constituent-alpha-suite-v*.tar.gz' 2>/dev/null | sort | tail -n1)"
+  DEPLOY_ARCHIVE="$(find "$ROOT_DIR/dist/release" -maxdepth 1 -name 'alpha-spy-v*.tar.gz' 2>/dev/null | sort | tail -n1)"
 fi
 [[ -n "$DEPLOY_ARCHIVE" && -f "$DEPLOY_ARCHIVE" ]] || {
   echo "No release archive available. Run 'make release' or set DEPLOY_ARCHIVE." >&2
@@ -72,9 +72,9 @@ echo "  archive: $ARCHIVE_NAME"
 echo "  target:  $TARGET:$DEPLOY_PORT"
 echo "  staging: $DEPLOY_REMOTE_DIR/$TREE_NAME"
 echo
-echo "  This stops the running suite, replaces /opt/spy-der, and restarts all"
-echo "  services in sandbox/paper mode. Data under /var/lib/spy-der and"
-echo "  /var/lib/zerodte is preserved. Production trading stays locked."
+echo "  This stops the running suite, replaces /opt/alpha-spy, and restarts all"
+echo "  services in sandbox/paper mode. Data under /var/lib/alpha-spy and"
+echo "  Production trading stays locked."
 echo
 if [[ "${DEPLOY_ASSUME_YES:-0}" != "1" ]]; then
   read -r -p "Type DEPLOY to continue: " reply
@@ -112,7 +112,7 @@ remote "sudo bash '$DEPLOY_REMOTE_DIR/$TREE_NAME/scripts/status.sh'" || true
 
 echo
 echo "Deployment complete."
-echo "Credentials on the target: sudo cat /root/spy-der-credentials.txt"
+echo "Credentials on the target: sudo cat /root/alpha-spy-credentials.txt"
 echo "Open the GUI through an SSH tunnel:"
 echo "  ssh -L 8788:127.0.0.1:8788 -L 8787:127.0.0.1:8787 -p $DEPLOY_PORT $TARGET"
 echo "  then browse to http://127.0.0.1:8788"

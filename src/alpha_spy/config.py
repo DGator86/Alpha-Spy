@@ -9,14 +9,14 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class PathsConfig(BaseModel):
-    state_root: Path = Path("/var/lib/spy-der")
-    database: Path = Path("/var/lib/spy-der/journal/suite-v2.db")
-    dashboard_database: Path = Path("/var/lib/spy-der/dashboard/command-center-v2.sqlite")
-    universe_cache: Path = Path("/var/lib/spy-der/reference/universe.csv")
-    model_dir: Path = Path("/var/lib/spy-der/models")
-    report_dir: Path = Path("/var/lib/spy-der/reports")
-    log_dir: Path = Path("/var/log/spy-der")
-    production_sentinel: Path = Path("/etc/spy-der/PRODUCTION_UNLOCKED")
+    state_root: Path = Path("/var/lib/alpha-spy")
+    database: Path = Path("/var/lib/alpha-spy/journal/alpha-spy.db")
+    dashboard_database: Path = Path("/var/lib/alpha-spy/dashboard/command-center.sqlite")
+    universe_cache: Path = Path("/var/lib/alpha-spy/reference/universe.csv")
+    model_dir: Path = Path("/var/lib/alpha-spy/models")
+    report_dir: Path = Path("/var/lib/alpha-spy/reports")
+    log_dir: Path = Path("/var/log/alpha-spy")
+    production_sentinel: Path = Path("/etc/alpha-spy/PRODUCTION_UNLOCKED")
 
 
 class TradierConfig(BaseModel):
@@ -57,7 +57,7 @@ class UniverseConfig(BaseModel):
             "1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund",
         ]
     )
-    local_csv: Path = Path("/etc/spy-der/universe.csv")
+    local_csv: Path = Path("/etc/alpha-spy/universe.csv")
     refresh_hour_et: int = 7
     maximum_age_hours: int = 36
     minimum_symbols: int = 450
@@ -169,7 +169,7 @@ class TradingConfig(BaseModel):
     limit_price_steps: int = 4
     limit_price_wait_seconds: int = 8
     cancel_confirm_seconds: int = 15
-    tag_prefix: str = "SPYDER"
+    tag_prefix: str = "ALPHASPY"
 
 
 class AuditConfig(BaseModel):
@@ -276,9 +276,9 @@ def _merge_env(config: SuiteConfig) -> SuiteConfig:
     if env in {"sandbox", "production"}:
         config.tradier.environment = env
     for field, variable in (
-        ("view_token", "SPY_DER_VIEW_TOKEN"),
-        ("admin_token", "SPY_DER_ADMIN_TOKEN"),
-        ("ingest_token", "SPY_DER_INGEST_TOKEN"),
+        ("view_token", "ALPHA_SPY_VIEW_TOKEN"),
+        ("admin_token", "ALPHA_SPY_ADMIN_TOKEN"),
+        ("ingest_token", "ALPHA_SPY_INGEST_TOKEN"),
     ):
         value = os.getenv(variable)
         if value is not None:
@@ -286,7 +286,7 @@ def _merge_env(config: SuiteConfig) -> SuiteConfig:
     return config
 
 
-def load_config(path: str | Path = "/etc/spy-der/config.yaml") -> SuiteConfig:
+def load_config(path: str | Path = "/etc/alpha-spy/config.yaml") -> SuiteConfig:
     path = Path(path)
     raw: dict = {}
     if path.exists():

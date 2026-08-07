@@ -1,0 +1,23 @@
+[Unit]
+Description=Alpha-SPY market collector
+Wants=network-online.target
+After=network-online.target
+PartOf=alpha-spy.target
+
+[Service]
+Type=simple
+User=alphaspy
+Group=alphaspy
+EnvironmentFile=-/etc/alpha-spy/secrets.env
+ExecStart=/opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml market
+Restart=always
+RestartSec=5
+Nice=0
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/alpha-spy /var/log/alpha-spy
+UMask=0077
+
+[Install]
+WantedBy=alpha-spy.target

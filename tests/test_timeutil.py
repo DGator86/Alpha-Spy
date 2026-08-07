@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from spy_der.config import RiskConfig
-from spy_der.timeutil import ET, at_or_after_et, in_et_window, parse_hhmm, utc_iso
+from alpha_spy.config import RiskConfig
+from alpha_spy.timeutil import ET, at_or_after_et, in_et_window, parse_hhmm, utc_iso
 
 # 2026: DST runs 8 March to 1 November.
 WINTER = datetime(2026, 1, 15, tzinfo=UTC)  # EST, UTC-5

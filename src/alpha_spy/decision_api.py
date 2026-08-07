@@ -11,10 +11,10 @@ from .db import Journal
 from .state import build_dashboard_state
 from .timeutil import utc_iso
 
-CONFIG_PATH = os.getenv("SPY_DER_CONFIG", "/etc/spy-der/config.yaml")
+CONFIG_PATH = os.getenv("ALPHA_SPY_CONFIG", "/etc/alpha-spy/config.yaml")
 config = load_config(CONFIG_PATH)
 journal = Journal(config.paths.database)
-app = FastAPI(title="SPY Constituent Alpha Decision Service", version="2.0.0")
+app = FastAPI(title="Alpha-SPY Decision Service", version="2.0.0")
 
 
 def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:

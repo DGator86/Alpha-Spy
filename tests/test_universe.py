@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from spy_der.config import SuiteConfig, UniverseConfig
-from spy_der.universe import (
+from alpha_spy.config import SuiteConfig, UniverseConfig
+from alpha_spy.universe import (
     Holding,
     UniverseProvider,
     _clean_sector,

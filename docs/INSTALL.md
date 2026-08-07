@@ -14,59 +14,59 @@
 ```bash
 df -h / /var/lib /var/tmp
 free -h
-pgrep -af 'spy-der|zerodte'
-systemctl list-units --all | grep -E 'spy-der|zerodte'
+pgrep -af 'alpha-spy'
+systemctl list-units --all | grep -E 'alpha-spy'
 rclone about gdrive:
 ```
 
-The installer preserves existing data and creates a timestamped copy of prior configuration. It also moves the previous `/opt/spy-der` tree to `/opt/spy-der.pre-v2-<timestamp>`.
+The installer performs a fresh installation. It rebuilds `/opt/alpha-spy` and regenerates `/etc/alpha-spy`, leaving trading data under `/var/lib/alpha-spy` in place.
 
 ## Installation
 
 ```bash
-tar -xzf spy-constituent-alpha-suite-v2.0.0.tar.gz
-cd spy-constituent-alpha-suite-v2.0.0
+tar -xzf alpha-spy-v2.0.0.tar.gz
+cd alpha-spy-v2.0.0
 sudo bash install.sh
 ```
 
 ## Generated files
 
 ```text
-/etc/spy-der/config.yaml
-/etc/spy-der/secrets.env
-/etc/spy-der/backup.env
-/etc/spy-der/universe.csv
-/root/spy-der-credentials.txt
+/etc/alpha-spy/config.yaml
+/etc/alpha-spy/secrets.env
+/etc/alpha-spy/backup.env
+/etc/alpha-spy/universe.csv
+/root/alpha-spy-credentials.txt
 ```
 
 ## Installed software
 
 ```text
-/opt/spy-der/release
-/opt/spy-der/venv
-/usr/local/sbin/spy-der-drive-backup
+/opt/alpha-spy/release
+/opt/alpha-spy/venv
+/usr/local/sbin/alpha-spy-backup
 ```
 
 ## Installed services
 
 ```text
-spy-der-market.service
-spy-der-engine.service
-spy-der-confirmation.service
-spy-der-settlement.service
-spy-der-decision.service
-spy-der-dashboard.service
-spy-der-dojo.timer
-spy-der-backup.timer
-spy-der.target
+alpha-spy-market.service
+alpha-spy-engine.service
+alpha-spy-confirmation.service
+alpha-spy-settlement.service
+alpha-spy-decision.service
+alpha-spy-dashboard.service
+alpha-spy-dojo.timer
+alpha-spy-backup.timer
+alpha-spy.target
 ```
 
 ## First checks
 
 ```bash
-systemctl status spy-der.target --no-pager
-systemctl list-timers --all | grep spy-der
-/opt/spy-der/release/scripts/doctor.sh
+systemctl status alpha-spy.target --no-pager
+systemctl list-timers --all | grep alpha-spy
+/opt/alpha-spy/release/scripts/doctor.sh
 ```
 
 ## Browser access
@@ -84,7 +84,7 @@ The dashboard is `http://127.0.0.1:8788` and the local decision API is `http://1
 Stop v2:
 
 ```bash
-systemctl disable --now spy-der.target spy-der-dojo.timer spy-der-backup.timer
+systemctl disable --now alpha-spy.target alpha-spy-dojo.timer alpha-spy-backup.timer
 ```
 
-The prior program tree is preserved under `/opt/spy-der.pre-v2-<timestamp>`. Prior configuration is preserved under `/var/backups/spy-der-pre-v2-<timestamp>`.
+Each install rebuilds `/opt/alpha-spy` from the release archive; see [UPGRADE.md](UPGRADE.md) for rollback.

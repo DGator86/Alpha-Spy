@@ -4,7 +4,7 @@
 #
 # systemd-analyze reports every ExecStart binary that is missing, which on a
 # build machine is all of them — the units point at install-time paths under
-# /opt/spy-der/venv/bin and /usr/local/sbin. Those specific complaints are
+# /opt/alpha-spy/venv/bin and /usr/local/sbin. Those specific complaints are
 # expected and filtered. Anything else is a real defect and fails the run.
 #
 # To keep the filter from hiding a typo, every ExecStart in the units is first
@@ -17,8 +17,8 @@ cd "$ROOT_DIR"
 
 # Paths scripts/install_vps.sh puts in place.
 INSTALLED_BINARIES=(
-  /opt/spy-der/venv/bin/spy-der
-  /usr/local/sbin/spy-der-drive-backup
+  /opt/alpha-spy/venv/bin/alpha-spy
+  /usr/local/sbin/alpha-spy-backup
 )
 
 echo "==> Checking ExecStart paths against what the installer creates"

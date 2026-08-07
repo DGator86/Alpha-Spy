@@ -35,7 +35,7 @@ class TradierClient:
             headers={
                 "Authorization": f"Bearer {self.token}",
                 "Accept": "application/json",
-                "User-Agent": "spy-constituent-alpha-suite/2.0.0",
+                "User-Agent": "alpha-spy/2.0.0",
             },
             follow_redirects=True,
         )

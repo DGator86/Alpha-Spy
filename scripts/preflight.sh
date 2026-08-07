@@ -14,11 +14,11 @@ free -h
 
 echo
 echo '=== Existing processes ==='
-pgrep -af 'spy-der|zerodte' || true
+pgrep -af 'alpha-spy' || true
 
 echo
 echo '=== Existing databases ==='
-find /var/lib/spy-der /var/lib/zerodte -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -printf '%s %p\n' 2>/dev/null | sort -n || true
+find /var/lib/alpha-spy -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -printf '%s %p\n' 2>/dev/null | sort -n || true
 
 echo
 echo '=== Google Drive ==='

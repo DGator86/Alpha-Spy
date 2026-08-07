@@ -1,38 +1,64 @@
-# Upgrade and Existing-System Preservation
+# Upgrade and Rollback
 
-The installer is designed for the current `srv1575978` layout but uses hostname-based backup paths and standard Linux locations, so it can also install on another Ubuntu VPS.
+Alpha-SPY is a standalone product. There is no migration path from any other
+application: the installer performs a fresh installation and touches only
+Alpha-SPY-owned paths, units and the `alphaspy` service account.
 
-During installation it:
+## Upgrading Alpha-SPY
 
-1. Stops and disables legacy SPY timers that could duplicate work.
-2. Stops prior `/opt/spy-der/venv/bin/spy-der` processes.
-3. Moves the existing `/opt/spy-der` directory to a timestamped side-by-side backup.
-4. Copies `/etc/spy-der/config.yaml` and `/etc/spy-der/secrets.env` into `/var/backups/spy-der-pre-v2-*`.
-5. Preserves `/var/lib/spy-der` and `/var/lib/zerodte` in place.
-6. Uses new v2 database filenames so prior SQLite databases are not overwritten.
-7. Recovers recognizable Tradier credentials and dashboard tokens when present.
-8. Installs and starts the new services in sandbox/paper mode.
+Upgrading is the same operation as installing. Transfer the new release,
+verify it, and run the installer:
 
-The installer never deletes trading data. The uninstall script also preserves `/var/lib/spy-der` and `/etc/spy-der`.
+```bash
+cd /root
+sha256sum -c alpha-spy-v<version>.tar.gz.sha256
+tar -xzf alpha-spy-v<version>.tar.gz
+cd alpha-spy-v<version>
+bash scripts/verify_release.sh ../alpha-spy-v<version>.tar.gz
+sudo bash install.sh
+```
+
+The installer:
+
+1. Stops the Alpha-SPY services and timers.
+2. Replaces `/opt/alpha-spy/release` and rebuilds `/opt/alpha-spy/venv`.
+3. Rewrites `/etc/alpha-spy/config.yaml` and `/etc/alpha-spy/universe.csv`.
+4. Issues fresh view, administrator and ingestion tokens.
+5. Removes `/etc/alpha-spy/PRODUCTION_UNLOCKED`, so an upgrade always lands
+   locked.
+6. Starts everything in sandbox/paper mode with order submission disabled.
+
+Trading data under `/var/lib/alpha-spy` is left in place — the installer never
+deletes it — but configuration and credentials are regenerated. Re-run
+`configure_tradier.sh` after an upgrade, and take a backup first:
+
+```bash
+sudo /opt/alpha-spy/release/scripts/backup_now.sh
+```
 
 ## Rollback
 
-To stop the new suite:
+Stop the suite:
 
 ```bash
-systemctl disable --now spy-der.target spy-der-dojo.timer spy-der-backup.timer
+sudo systemctl disable --now alpha-spy.target alpha-spy-dojo.timer alpha-spy-backup.timer
 ```
 
-The former installation remains under a directory similar to:
+Then install the release you want to return to, exactly as above. Because each
+install rebuilds `/opt/alpha-spy` from the archive, rolling back means
+installing the older archive; there is no side-by-side copy to restore from.
 
-```text
-/opt/spy-der.pre-v2-YYYYMMDDTHHMMSSZ
+Restoring data is covered in [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+
+Do not copy an older executable over a running installation. Stop the target
+first.
+
+## Removing Alpha-SPY
+
+```bash
+sudo /opt/alpha-spy/release/scripts/uninstall.sh
 ```
 
-The former configuration backup remains under:
-
-```text
-/var/backups/spy-der-pre-v2-YYYYMMDDTHHMMSSZ
-```
-
-Do not restore an old executable over the new installation while the new services are running.
+This removes the software, units and backup tooling. It preserves
+`/var/lib/alpha-spy` and `/etc/alpha-spy` so data and configuration survive;
+delete those directories by hand if you want the host clean.

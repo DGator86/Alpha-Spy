@@ -18,8 +18,8 @@ from .universe import UniverseProvider
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="spy-der", description="SPY Constituent Alpha full software suite")
-    p.add_argument("--config", default="/etc/spy-der/config.yaml")
+    p = argparse.ArgumentParser(prog="alpha-spy", description="Alpha-SPY")
+    p.add_argument("--config", default="/etc/alpha-spy/config.yaml")
     p.add_argument("--state-root", default=None)
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -60,8 +60,8 @@ def _config(args: argparse.Namespace) -> SuiteConfig:
     if args.state_root:
         root = Path(args.state_root)
         config.paths.state_root = root
-        config.paths.database = root / "journal" / "suite-v2.db"
-        config.paths.dashboard_database = root / "dashboard" / "command-center-v2.sqlite"
+        config.paths.database = root / "journal" / "alpha-spy.db"
+        config.paths.dashboard_database = root / "dashboard" / "command-center.sqlite"
         config.paths.universe_cache = root / "reference" / "universe.csv"
         config.paths.model_dir = root / "models"
         config.paths.report_dir = root / "reports"
@@ -82,7 +82,7 @@ def _configure_dashboard_env(config: SuiteConfig) -> None:
     os.environ["TRADIER_ACCESS_TOKEN"] = config.tradier.access_token.get_secret_value()
     os.environ["TRADIER_ACCOUNT_ID"] = config.tradier.account_id
     os.environ["TRADIER_READ_ONLY"] = "true"
-    os.environ["ENGINE_NAME"] = "SPY Constituent Alpha Suite"
+    os.environ["ENGINE_NAME"] = "Alpha-SPY"
     os.environ["ENGINE_VERSION"] = __version__
 
 
@@ -173,8 +173,8 @@ def main() -> None:
     elif args.command == "settlement":
         SettlementService(config, journal).run_forever()
     elif args.command == "decision-service":
-        os.environ["SPY_DER_CONFIG"] = args.config
-        uvicorn.run("spy_der.decision_api:app", host=args.host, port=args.port, log_level="info")
+        os.environ["ALPHA_SPY_CONFIG"] = args.config
+        uvicorn.run("alpha_spy.decision_api:app", host=args.host, port=args.port, log_level="info")
     elif args.command == "dashboard-api":
         _configure_dashboard_env(config)
         from spy_alpha_dashboard.config import get_settings

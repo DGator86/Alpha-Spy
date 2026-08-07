@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Clean break: Alpha-SPY
+
+Alpha-SPY is a standalone product, not an upgrade to any previous trading
+application. All legacy identity and migration logic is gone.
+
+- Package `spy_der` renamed to `alpha_spy`; CLI `spy-der` to `alpha-spy`;
+  distribution to `alpha-spy`.
+- Paths moved to `/opt/alpha-spy`, `/etc/alpha-spy`, `/var/lib/alpha-spy`,
+  `/var/log/alpha-spy`; service account `alphaspy`.
+- All eleven systemd units renamed into `alpha-spy-*`.
+- Databases are `alpha-spy.db` and `command-center.sqlite`; the `-v2` suffixes,
+  which existed only to avoid clobbering a previous system's files, are gone.
+- Environment variables `SPY_DER_*` renamed to `ALPHA_SPY_*`.
+- Removed every trace of the previous systems: `/var/lib/zerodte` from the
+  backup roots, preflight and support bundle; the old backup unit the installer
+  used to stop and disable; the `pre-v2` install and configuration preservation;
+  and the recovery of credentials from a previous configuration.
+- The installer now assumes a fresh installation and touches only Alpha-SPY
+  paths, units and the `alphaspy` account. It leaves other applications alone.
+- `docs/UPGRADE.md` rewritten: Alpha-SPY upgrade and rollback, no migration.
+- The Dojo is retained in full and renamed into the namespace
+  (`alpha-spy-dojo.service`, `alpha-spy-dojo.timer`, `reports/dojo`,
+  `models/challengers`). This is a namespace cleanup, not a feature reduction.
+- `scripts/check_legacy_identifiers.sh` fails the build if any prohibited
+  identifier reappears; wired into `make lint` and CI static validation.
+
+
 ### Correctness fixes
 
 - **Account state could not be parsed for a flat account.** `parse_account_state`
@@ -35,7 +62,7 @@
   raised; the suite permits `pandas<4`.
 - **Operator scripts assumed system PyYAML.** `production_lock.sh`,
   `production_unlock.sh` and `export_support_bundle.sh` invoked bare `python3`
-  to edit `/etc/spy-der/config.yaml`, but PyYAML ships with the wheel and the
+  to edit `/etc/alpha-spy/config.yaml`, but PyYAML ships with the wheel and the
   installer never added `python3-yaml`. They now prefer the suite interpreter,
   and the installer provides a fallback.
 - **`doctor` reported `ok` while entries were blocked.** Its verdict considered

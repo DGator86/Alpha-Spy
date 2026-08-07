@@ -4,19 +4,19 @@ from pathlib import Path
 
 import pytest
 
-from spy_der.config import SuiteConfig
-from spy_der.db import Journal
-from spy_der.execution import build_multileg_payload
-from spy_der.services import ConfirmationService, DojoService, EngineService, MarketService
-from spy_der.strategy import generate_candidates
-from spy_der.tradier import normalize_quote
+from alpha_spy.config import SuiteConfig
+from alpha_spy.db import Journal
+from alpha_spy.execution import build_multileg_payload
+from alpha_spy.services import ConfirmationService, DojoService, EngineService, MarketService
+from alpha_spy.strategy import generate_candidates
+from alpha_spy.tradier import normalize_quote
 
 
 def make_config(tmp_path: Path) -> SuiteConfig:
     config = SuiteConfig()
     config.paths.state_root = tmp_path
-    config.paths.database = tmp_path / "journal" / "suite-v2.db"
-    config.paths.dashboard_database = tmp_path / "dashboard" / "command-center-v2.sqlite"
+    config.paths.database = tmp_path / "journal" / "alpha-spy.db"
+    config.paths.dashboard_database = tmp_path / "dashboard" / "command-center.sqlite"
     config.paths.universe_cache = tmp_path / "reference" / "universe.csv"
     config.paths.model_dir = tmp_path / "models"
     config.paths.report_dir = tmp_path / "reports"

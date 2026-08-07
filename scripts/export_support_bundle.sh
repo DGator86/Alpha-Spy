@@ -6,18 +6,18 @@ umask 077
 # PyYAML ships as a dependency of the installed wheel, not of the system
 # interpreter, and install_vps.sh never adds python3-yaml. Prefer the suite's
 # virtualenv so this keeps working on a minimal Ubuntu image.
-PYTHON="${SPY_DER_PYTHON:-/opt/spy-der/venv/bin/python}"
+PYTHON="${ALPHA_SPY_PYTHON:-/opt/alpha-spy/venv/bin/python}"
 [[ -x "$PYTHON" ]] || PYTHON=python3
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-WORK="$(mktemp -d /var/tmp/spy-der-support.XXXXXX)"
-OUT="/root/spy-der-support-$STAMP.tar.gz"
+WORK="$(mktemp -d /var/tmp/alpha-spy-support.XXXXXX)"
+OUT="/root/alpha-spy-support-$STAMP.tar.gz"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK"
 
 "$PYTHON" - <<'PY' >"$WORK/config-redacted.yaml"
 from pathlib import Path
 import yaml
-p=Path('/etc/spy-der/config.yaml')
+p=Path('/etc/alpha-spy/config.yaml')
 d=yaml.safe_load(p.read_text()) if p.exists() else {}
 if isinstance(d,dict):
     if isinstance(d.get('tradier'),dict): d['tradier']['access_token']='***REDACTED***'
@@ -26,16 +26,16 @@ if isinstance(d,dict):
 print(yaml.safe_dump(d,sort_keys=False))
 PY
 
-systemctl status spy-der.target --no-pager >"$WORK/target-status.txt" 2>&1 || true
+systemctl status alpha-spy.target --no-pager >"$WORK/target-status.txt" 2>&1 || true
 systemctl list-timers --all >"$WORK/timers.txt" 2>&1 || true
-journalctl -u 'spy-der-*' --since '24 hours ago' --no-pager -n 5000 >"$WORK/recent-logs.txt" 2>&1 || true
+journalctl -u 'alpha-spy-*' --since '24 hours ago' --no-pager -n 5000 >"$WORK/recent-logs.txt" 2>&1 || true
 df -h >"$WORK/disk.txt"
 free -h >"$WORK/memory.txt"
-pgrep -af 'spy-der|zerodte' >"$WORK/processes.txt" || true
+pgrep -af 'alpha-spy' >"$WORK/processes.txt" || true
 rclone version >"$WORK/rclone-version.txt" 2>&1 || true
 rclone about gdrive: >"$WORK/gdrive-about.txt" 2>&1 || true
 
-for db in /var/lib/spy-der/journal/suite-v2.db /var/lib/spy-der/dashboard/command-center-v2.sqlite; do
+for db in /var/lib/alpha-spy/journal/alpha-spy.db /var/lib/alpha-spy/dashboard/command-center.sqlite; do
   [[ -f "$db" ]] || continue
   name="$(basename "$db")"
   sqlite3 "$db" '.schema' >"$WORK/$name-schema.sql" 2>&1 || true
@@ -43,6 +43,6 @@ for db in /var/lib/spy-der/journal/suite-v2.db /var/lib/spy-der/dashboard/comman
   stat "$db" >"$WORK/$name-stat.txt"
 done
 
-sha256sum /opt/spy-der/release/dist/*.whl >"$WORK/wheel-checksums.txt" 2>/dev/null || true
+sha256sum /opt/alpha-spy/release/dist/*.whl >"$WORK/wheel-checksums.txt" 2>/dev/null || true
 tar -C "$WORK" -czf "$OUT" .
 echo "$OUT"

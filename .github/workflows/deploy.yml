@@ -5,7 +5,7 @@ name: Deploy to VPS
 #
 # It deploys the shipped fail-closed posture (Tradier sandbox, paper mode,
 # order submission disabled, no production sentinel) and preserves data under
-# /var/lib/spy-der and /var/lib/zerodte. It cannot enable production trading.
+# only Alpha-SPY paths. It cannot enable production trading.
 #
 # Required repository secrets:
 #   VPS_HOST             hostname or IP of the target
@@ -118,5 +118,5 @@ jobs:
             echo "# then browse to http://127.0.0.1:8788"
             echo '```'
             echo
-            echo "Tokens are on the target at \`/root/spy-der-credentials.txt\`."
+            echo "Tokens are on the target at \`/root/alpha-spy-credentials.txt\`."
           } >> "$GITHUB_STEP_SUMMARY"

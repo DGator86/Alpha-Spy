@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from spy_der.config import SuiteConfig
-from spy_der.db import Journal
-from spy_der.risk import (
+from alpha_spy.config import SuiteConfig
+from alpha_spy.db import Journal
+from alpha_spy.risk import (
     AccountState,
     allowed_risk,
     choose_decision,
@@ -25,7 +25,7 @@ from spy_der.risk import (
 def make_config(tmp_path: Path) -> SuiteConfig:
     config = SuiteConfig()
     config.paths.state_root = tmp_path
-    config.paths.database = tmp_path / "journal" / "suite-v2.db"
+    config.paths.database = tmp_path / "journal" / "alpha-spy.db"
     config.paths.dashboard_database = tmp_path / "dashboard" / "cc.sqlite"
     config.paths.universe_cache = tmp_path / "reference" / "universe.csv"
     config.paths.model_dir = tmp_path / "models"

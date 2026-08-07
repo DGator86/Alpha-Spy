@@ -10,7 +10,7 @@ python3 - "$TOKEN" "$ACCOUNT" "$ENVIRONMENT" <<'PY'
 from pathlib import Path
 import shlex
 import sys
-p=Path('/etc/spy-der/secrets.env')
+p=Path('/etc/alpha-spy/secrets.env')
 updates={'TRADIER_ACCESS_TOKEN':sys.argv[1],'TRADIER_ACCOUNT_ID':sys.argv[2],'TRADIER_ENVIRONMENT':sys.argv[3]}
 lines=p.read_text().splitlines() if p.exists() else []
 seen=set(); out=[]
@@ -23,8 +23,8 @@ for key,val in updates.items():
     if key not in seen: out.append(f'{key}={shlex.quote(val)}')
 p.write_text('\n'.join(out)+'\n')
 PY
-chmod 640 /etc/spy-der/secrets.env
-chown root:spyder /etc/spy-der/secrets.env
-systemctl restart spy-der.target
+chmod 640 /etc/alpha-spy/secrets.env
+chown root:alphaspy /etc/alpha-spy/secrets.env
+systemctl restart alpha-spy.target
 sleep 5
-/opt/spy-der/venv/bin/spy-der --config /etc/spy-der/config.yaml doctor
+/opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml doctor

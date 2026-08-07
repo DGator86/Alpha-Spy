@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build a distributable SPY Constituent Alpha Suite release.
+# Build a distributable Alpha-SPY release.
 #
 # Produces, under release/<version>/:
-#   spy-constituent-alpha-suite-v<version>.tar.gz  (+ .sha256)
-#   spy-constituent-alpha-suite-v<version>.zip     (+ .sha256)
+#   alpha-spy-v<version>.tar.gz  (+ .sha256)
+#   alpha-spy-v<version>.zip     (+ .sha256)
 #   RELEASE_MANIFEST.sha256
 #
 # The archives contain the same layout the v2.0.0 release shipped: source
@@ -32,7 +32,7 @@ print(match.group(1))
 PY
 )"
 
-NAME="spy-constituent-alpha-suite-v$VERSION"
+NAME="alpha-spy-v$VERSION"
 STAGE_ROOT="$ROOT_DIR/dist/.stage"
 STAGE="$STAGE_ROOT/$NAME"
 # Build output only. The committed release/ directory holds the archived
@@ -53,7 +53,7 @@ mkdir -p "$STAGE" "$OUT_DIR"
 
 echo "==> [2/6] Building the application wheel"
 "$PYTHON" -m build --wheel --outdir "$ROOT_DIR/dist"
-WHEEL="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'spy_constituent_alpha_suite-*.whl' | head -n1)"
+WHEEL="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'alpha_spy-*.whl' | head -n1)"
 [[ -n "$WHEEL" ]] || { echo "Wheel build produced no artifact" >&2; exit 1; }
 echo "    wheel: $(basename "$WHEEL")"
 
@@ -89,7 +89,7 @@ find "$STAGE" -name '*.py[cod]' -delete
 find "$STAGE" -name '*.egg-info' -type d -prune -exec rm -rf {} +
 rm -rf "$STAGE/build" "$STAGE/.pytest_cache" "$STAGE/.ruff_cache"
 
-chmod 0755 "$STAGE/install.sh" "$STAGE"/scripts/*.sh "$STAGE/scripts/spy-der-drive-backup"
+chmod 0755 "$STAGE/install.sh" "$STAGE"/scripts/*.sh "$STAGE/scripts/alpha-spy-backup"
 
 echo "==> [4/6] Writing RELEASE_MANIFEST.sha256"
 # The manifest covers every file except itself; it cannot hash its own contents.

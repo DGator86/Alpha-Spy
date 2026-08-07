@@ -1331,7 +1331,7 @@ class DojoService:
         )
 
         markdown = [
-            "# SPY Constituent Alpha Dojo Report",
+            "# Alpha-SPY Dojo Report",
             "",
             f"Generated: {report['generated_at']}",
             f"Evidence window: last {recent_days} days (from {cutoff})",

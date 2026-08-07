@@ -1,0 +1,23 @@
+[Unit]
+Description=Alpha-SPY position monitor and settlement service
+Wants=network-online.target alpha-spy-market.service
+After=network-online.target alpha-spy-market.service
+PartOf=alpha-spy.target
+
+[Service]
+Type=simple
+User=alphaspy
+Group=alphaspy
+EnvironmentFile=-/etc/alpha-spy/secrets.env
+ExecStart=/opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml settlement
+Restart=always
+RestartSec=5
+Nice=-1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/alpha-spy /var/log/alpha-spy
+UMask=0077
+
+[Install]
+WantedBy=alpha-spy.target

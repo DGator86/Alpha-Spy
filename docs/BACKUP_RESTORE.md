@@ -5,13 +5,13 @@
 The timer runs every day at 5:00 PM America/New_York:
 
 ```bash
-systemctl list-timers --all | grep spy-der-backup
+systemctl list-timers --all | grep alpha-spy-backup
 systemd-analyze calendar '*-*-* 17:00:00 America/New_York'
 ```
 
 ## Backup contents
 
-- Every recognized SQLite database under `/var/lib/spy-der` and `/var/lib/zerodte`
+- Every recognized SQLite database under `/var/lib/alpha-spy`
 - Verified online snapshots compressed with Zstandard
 - Dated and `latest` database copies
 - Incremental copies of non-database raw data
@@ -22,8 +22,8 @@ The backup uses `rclone copy`, not destructive synchronization. It does not dele
 ## Run manually
 
 ```bash
-systemctl start spy-der-backup.service
-journalctl -u spy-der-backup.service -f
+systemctl start alpha-spy-backup.service
+journalctl -u alpha-spy-backup.service -f
 ```
 
 ## Remote layout
@@ -34,8 +34,7 @@ SPY Trading Backups/<hostname>/
     daily/YYYY-MM-DD/
     latest/
   raw/
-    spy-der/
-    zerodte/
+    alpha-spy/
   manifests/
 ```
 
@@ -52,14 +51,14 @@ SPY Trading Backups/<hostname>/
 Example:
 
 ```bash
-systemctl stop spy-der.target
+systemctl stop alpha-spy.target
 rclone copyto \
-  'gdrive:SPY Trading Backups/srv1575978/database-snapshots/latest/spy-der/journal/suite-v2.db.zst' \
-  /var/tmp/suite-v2.db.zst
-zstd -d -f /var/tmp/suite-v2.db.zst -o /var/tmp/suite-v2.db
-sqlite3 /var/tmp/suite-v2.db 'PRAGMA quick_check;'
-cp -a /var/lib/spy-der/journal/suite-v2.db /var/backups/suite-v2-before-restore.db
-install -o spyder -g spyder -m 600 /var/tmp/suite-v2.db /var/lib/spy-der/journal/suite-v2.db
-systemctl start spy-der.target
-/opt/spy-der/release/scripts/doctor.sh
+  'gdrive:SPY Trading Backups/srv1575978/database-snapshots/latest/alpha-spy/journal/alpha-spy.db.zst' \
+  /var/tmp/alpha-spy.db.zst
+zstd -d -f /var/tmp/alpha-spy.db.zst -o /var/tmp/alpha-spy.db
+sqlite3 /var/tmp/alpha-spy.db 'PRAGMA quick_check;'
+cp -a /var/lib/alpha-spy/journal/alpha-spy.db /var/backups/alpha-spy-before-restore.db
+install -o alphaspy -g alphaspy -m 600 /var/tmp/alpha-spy.db /var/lib/alpha-spy/journal/alpha-spy.db
+systemctl start alpha-spy.target
+/opt/alpha-spy/release/scripts/doctor.sh
 ```

@@ -68,8 +68,8 @@ engine cycle.
 v2.0.0 release shipped — and produces:
 
 ```text
-dist/release/spy-constituent-alpha-suite-v<version>.tar.gz  (+ .sha256)
-dist/release/spy-constituent-alpha-suite-v<version>.zip     (+ .sha256)
+dist/release/alpha-spy-v<version>.tar.gz  (+ .sha256)
+dist/release/alpha-spy-v<version>.zip     (+ .sha256)
 dist/release/RELEASE_MANIFEST.sha256
 ```
 
@@ -149,16 +149,16 @@ an existing tag replaces the assets and rewrites the notes.
 Verify a published release before installing it:
 
 ```bash
-curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/spy-constituent-alpha-suite-v2.1.0.tar.gz
-curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/spy-constituent-alpha-suite-v2.1.0.tar.gz.sha256
-sha256sum -c spy-constituent-alpha-suite-v2.1.0.tar.gz.sha256
+curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/alpha-spy-v2.1.0.tar.gz
+curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/alpha-spy-v2.1.0.tar.gz.sha256
+sha256sum -c alpha-spy-v2.1.0.tar.gz.sha256
 ```
 
 ## Deploying to the VPS
 
 Both paths run the suite's own `install.sh`, which stops the running services,
-preserves `/var/lib/spy-der` and `/var/lib/zerodte`, moves the prior
-`/opt/spy-der` aside, installs the wheel into a fresh virtualenv, reinstalls
+leaves trading data under `/var/lib/alpha-spy` in place, rebuilds
+`/opt/alpha-spy`, installs the wheel into a fresh virtualenv, reinstalls
 the systemd units, and restarts everything in the shipped fail-closed posture.
 
 Neither path can enable production trading. That still requires the separate,
@@ -218,9 +218,9 @@ scope the environment to the branches you deploy from.
 ### After deploying
 
 ```bash
-sudo /opt/spy-der/release/scripts/status.sh
-sudo /opt/spy-der/release/scripts/doctor.sh
-sudo cat /root/spy-der-credentials.txt
+sudo /opt/alpha-spy/release/scripts/status.sh
+sudo /opt/alpha-spy/release/scripts/doctor.sh
+sudo cat /root/alpha-spy-credentials.txt
 ```
 
 Open the Command Center through an SSH tunnel — the dashboard and decision
@@ -232,8 +232,8 @@ ssh -L 8788:127.0.0.1:8788 -L 8787:127.0.0.1:8787 root@YOUR_VPS_IP
 ```
 
 Rolling back is covered in [UPGRADE.md](UPGRADE.md); the installer leaves the
-previous tree at `/opt/spy-der.pre-v2-<timestamp>` and prior configuration
-under `/var/backups/spy-der-pre-v2-<timestamp>`.
+data under `/var/lib/alpha-spy` untouched, so rolling back means installing
+the older archive.
 
 ## GUI preview
 
@@ -247,7 +247,7 @@ ever gains an external resource reference. Enable it once under
 ## Repository layout
 
 ```text
-src/            spy_der (suite), spy_constituent_alpha (research), spy_alpha_dashboard (GUI)
+src/            alpha_spy (suite), spy_constituent_alpha (research), spy_alpha_dashboard (GUI)
 tests/          test suite
 examples/       research drivers
 config/         shipped fail-closed configuration and constituent universe

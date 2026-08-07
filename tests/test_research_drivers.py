@@ -94,6 +94,14 @@ def test_synthetic_demo_reproduces_its_committed_output(tmp_path):
     assert list(produced.columns) == list(expected.columns), "edge table columns changed"
     assert len(produced) == len(expected), "number of surviving candidates changed"
 
+    # Candidates with identical scores tie in the ranking sort, and different
+    # pandas/numpy builds break that tie differently. The invariant is the set
+    # of candidates and their values, not the order ties happen to land in.
+    key = "symbol"
+    produced = produced.sort_values(key, kind="stable").reset_index(drop=True)
+    expected = expected.sort_values(key, kind="stable").reset_index(drop=True)
+    assert list(produced[key]) == list(expected[key]), "the surviving candidate set changed"
+
     for column in expected.columns:
         if pd.api.types.is_numeric_dtype(expected[column]):
             pd.testing.assert_series_equal(

@@ -1,7 +1,0 @@
-[Unit]
-Description=SPY Constituent Alpha full service suite
-Wants=spy-der-market.service spy-der-engine.service spy-der-confirmation.service spy-der-settlement.service spy-der-decision.service spy-der-dashboard.service
-After=network-online.target
-
-[Install]
-WantedBy=multi-user.target

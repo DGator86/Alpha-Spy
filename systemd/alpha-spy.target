@@ -1,0 +1,7 @@
+[Unit]
+Description=Alpha-SPY services
+Wants=alpha-spy-market.service alpha-spy-engine.service alpha-spy-confirmation.service alpha-spy-settlement.service alpha-spy-decision.service alpha-spy-dashboard.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

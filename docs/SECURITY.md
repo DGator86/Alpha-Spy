@@ -9,8 +9,8 @@
 
 ## Credentials
 
-- Tradier and dashboard tokens are stored in `/etc/spy-der/secrets.env`.
-- The file is readable by root and the `spyder` group only.
+- Tradier and dashboard tokens are stored in `/etc/alpha-spy/secrets.env`.
+- The file is readable by root and the `alphaspy` group only.
 - View, administrator and ingestion tokens are separate.
 - Browser tokens use session storage rather than persistent local storage.
 

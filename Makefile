@@ -1,13 +1,13 @@
 PYTHON ?= python3
 VERSION := $(shell $(PYTHON) -c "import re,pathlib;print(re.search(r'^version\s*=\s*\"([^\"]+)\"',pathlib.Path('pyproject.toml').read_text(),re.M).group(1))")
-NAME := spy-constituent-alpha-suite-v$(VERSION)
+NAME := alpha-spy-v$(VERSION)
 # Build output. release/ holds the archived upstream drops and is not written to.
 RELEASE_DIR := dist/release
 
 .PHONY: help venv test lint smoke build release verify verify-release deploy clean
 
 help:
-	@echo "SPY Constituent Alpha Suite $(VERSION)"
+	@echo "Alpha-SPY $(VERSION)"
 	@echo
 	@echo "  make venv            create .venv with runtime and dev dependencies"
 	@echo "  make lint            static validation (python, shell, javascript, systemd)"
@@ -30,8 +30,9 @@ test:
 	PYTHONPATH=src:. pytest -q
 
 lint:
+	bash scripts/check_legacy_identifiers.sh
 	$(PYTHON) -m compileall -q src tests examples
-	bash -n install.sh scripts/*.sh scripts/spy-der-drive-backup
+	bash -n install.sh scripts/*.sh scripts/alpha-spy-backup
 	@if command -v ruff >/dev/null; then ruff check src tests examples; \
 		else echo "ruff not installed (make venv); skipped lint"; fi
 	@if command -v node >/dev/null; then node --check src/spy_alpha_dashboard/static/app.js; \

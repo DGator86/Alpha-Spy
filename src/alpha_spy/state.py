@@ -124,7 +124,7 @@ def build_dashboard_state(
     return {
         "timestamp": utc_iso(now),
         "engine": {
-            "name": "SPY Constituent Alpha Suite",
+            "name": "Alpha-SPY",
             "version": "2.0.0",
             "environment": config.tradier.environment.upper(),
             "mode": mode,

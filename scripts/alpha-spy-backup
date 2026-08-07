@@ -5,12 +5,12 @@ umask 077
 export TZ="America/New_York"
 export RCLONE_CONFIG="${RCLONE_CONFIG:-/root/.config/rclone/rclone.conf}"
 HOST="$(hostname -s)"
-REMOTE="${SPY_DER_BACKUP_REMOTE:-gdrive:SPY Trading Backups/$HOST}"
+REMOTE="${ALPHA_SPY_BACKUP_REMOTE:-gdrive:SPY Trading Backups/$HOST}"
 REMOTE_NAME="${REMOTE%%:*}:"
 DAY="$(date +%F)"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-LOCK="${SPY_DER_BACKUP_LOCK:-/run/lock/spy-der-drive-backup.lock}"
-ROOTS=("${SPY_DER_STATE_ROOT:-/var/lib/spy-der}" "${SPY_DER_LEGACY_ROOT:-/var/lib/zerodte}")
+LOCK="${ALPHA_SPY_BACKUP_LOCK:-/run/lock/alpha-spy-backup.lock}"
+ROOTS=("${ALPHA_SPY_STATE_ROOT:-/var/lib/alpha-spy}")
 
 log() {
   printf '%s %s\n' "$(date -Is)" "$*"
@@ -84,13 +84,13 @@ flock -n 9 || {
   exit 0
 }
 
-WORK="$(mktemp -d /var/tmp/spy-der-backup.XXXXXX)"
+WORK="$(mktemp -d /var/tmp/alpha-spy-backup.XXXXXX)"
 MANIFEST="$WORK/manifest.txt"
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
 
 {
-  echo "SPY Constituent Alpha backup"
+  echo "Alpha-SPY backup"
   echo "host=$HOST"
   echo "started_utc=$STAMP"
   echo "started_eastern=$(date -Is)"

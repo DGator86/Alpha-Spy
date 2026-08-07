@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
+from alpha_spy.config import SuiteConfig
+from alpha_spy.db import Journal
 from spy_alpha_dashboard.db import Repository
-from spy_der.config import SuiteConfig
-from spy_der.db import Journal
 
 linux_only = pytest.mark.skipif(
     not sys.platform.startswith("linux") or not os.path.isdir("/proc/self/fd"),
@@ -29,7 +29,7 @@ def _open_fds() -> int:
 def make_config(tmp_path: Path) -> SuiteConfig:
     config = SuiteConfig()
     config.paths.state_root = tmp_path
-    config.paths.database = tmp_path / "journal" / "suite-v2.db"
+    config.paths.database = tmp_path / "journal" / "alpha-spy.db"
     config.paths.dashboard_database = tmp_path / "dashboard" / "cc.sqlite"
     config.paths.universe_cache = tmp_path / "reference" / "universe.csv"
     config.paths.model_dir = tmp_path / "models"
@@ -123,7 +123,7 @@ def test_matured_predictions_are_not_reselected(tmp_path):
     pending_predictions excludes anything that already has an outcome row, so
     an outcome cannot be recomputed and overwritten on a later cycle.
     """
-    from spy_der.services import EngineService, MarketService
+    from alpha_spy.services import EngineService, MarketService
 
     config = make_config(tmp_path)
     config.universe.source = "fallback"

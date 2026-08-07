@@ -1,13 +1,13 @@
 [Unit]
-Description=Back up SPY Constituent Alpha data to Google Drive
+Description=Back up Alpha-SPY data to Google Drive
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
 User=root
-EnvironmentFile=-/etc/spy-der/backup.env
-ExecStart=/usr/local/sbin/spy-der-drive-backup
+EnvironmentFile=-/etc/alpha-spy/backup.env
+ExecStart=/usr/local/sbin/alpha-spy-backup
 Nice=15
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
