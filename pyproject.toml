@@ -3,12 +3,12 @@ requires = ["setuptools>=75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spy-constituent-alpha-suite"
+name = "alpha-spy"
 version = "2.0.0"
 description = "Complete constituent-driven SPY options research, execution, audit, confirmation, and dashboard suite"
 readme = "README.md"
 requires-python = ">=3.11"
-authors = [{name = "SPY Constituent Alpha Project"}]
+authors = [{name = "Alpha-SPY Project"}]
 dependencies = [
   "numpy>=1.26,<3",
   "pandas>=2.1,<4",
@@ -25,10 +25,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1"]
+# tabulate backs DataFrame.to_markdown(), which every research driver under
+# examples/ calls when it writes its REPORT.md. It is not needed by the
+# installed runtime under src/, so it stays out of the core dependency list
+# and off the trading VPS.
+research = ["tabulate>=0.9,<1"]
+dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1", "tabulate>=0.9,<1"]
 
 [project.scripts]
-spy-der = "spy_der.cli:main"
+alpha-spy = "alpha_spy.cli:main"
 spy-alpha = "spy_constituent_alpha.cli:app"
 spy-alpha-dashboard = "spy_alpha_dashboard.cli:main"
 
@@ -108,4 +113,4 @@ extend-immutable-calls = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["spy_der", "spy_alpha_dashboard", "spy_constituent_alpha"]
+known-first-party = ["alpha_spy", "spy_alpha_dashboard", "spy_constituent_alpha"]

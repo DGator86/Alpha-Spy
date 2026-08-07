@@ -30,11 +30,14 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Legacy identifiers
+        run: bash scripts/check_legacy_identifiers.sh
+
       - name: Python compilation
         run: python -m compileall -q src tests examples
 
       - name: Shell syntax
-        run: bash -n install.sh scripts/*.sh scripts/spy-der-drive-backup
+        run: bash -n install.sh scripts/*.sh scripts/alpha-spy-backup
 
       - name: Dashboard JavaScript syntax
         run: node --check src/spy_alpha_dashboard/static/app.js
@@ -97,7 +100,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: spy-constituent-alpha-suite
+          name: alpha-spy
           path: |
             dist/release/*.tar.gz
             dist/release/*.zip

@@ -1,0 +1,22 @@
+[Unit]
+Description=Alpha-SPY Command Center GUI
+Wants=network-online.target
+After=network-online.target
+PartOf=alpha-spy.target
+
+[Service]
+Type=simple
+User=alphaspy
+Group=alphaspy
+EnvironmentFile=-/etc/alpha-spy/secrets.env
+ExecStart=/opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml dashboard-api --host 127.0.0.1 --port 8788
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/alpha-spy /var/log/alpha-spy
+UMask=0077
+
+[Install]
+WantedBy=alpha-spy.target

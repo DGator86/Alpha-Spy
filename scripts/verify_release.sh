@@ -57,7 +57,7 @@ for path in install.sh scripts/install_vps.sh config/suite.yaml config/universe.
   [[ -f "$path" ]] || { echo "Missing required file: $path" >&2; exit 1; }
   echo "    present: $path"
 done
-WHEEL="$(find dist -maxdepth 1 -name 'spy_constituent_alpha_suite-*.whl' | head -n1)"
+WHEEL="$(find dist -maxdepth 1 -name 'alpha_spy-*.whl' | head -n1)"
 [[ -n "$WHEEL" ]] || { echo "Missing application wheel under dist/" >&2; exit 1; }
 echo "    present: $WHEEL"
 

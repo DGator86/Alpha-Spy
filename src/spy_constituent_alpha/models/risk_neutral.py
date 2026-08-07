@@ -85,7 +85,10 @@ class SyntheticRiskNeutralModel:
             raise ValueError("At least two constituent smiles are required")
         w = weights.reindex(tickers).fillna(0.0).astype(float)
         w = w / w.sum()
-        corr = correlation.reindex(index=tickers, columns=tickers).to_numpy(dtype=float)
+        # copy=True is required: under pandas copy-on-write (the default from
+        # 3.0) to_numpy() can hand back a read-only view of the frame's block,
+        # and the correlation-risk-premium write below mutates this array.
+        corr = correlation.reindex(index=tickers, columns=tickers).to_numpy(dtype=float, copy=True)
         # Apply a non-circular, externally estimated normal correlation-risk premium.
         off_diag = ~np.eye(len(corr), dtype=bool)
         corr[off_diag] = np.clip(corr[off_diag] + correlation_risk_premium, -0.95, 0.99)

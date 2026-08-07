@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "/etc/spy-der/dashboard.env"),
+        env_file=(".env", "/etc/alpha-spy/dashboard.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8788
-    dashboard_db: Path = Path("/var/lib/spy-der/dashboard/command-center-v2.sqlite")
+    dashboard_db: Path = Path("/var/lib/alpha-spy/dashboard/command-center.sqlite")
     dashboard_mode: str = Field(default="demo", pattern="^(demo|live)$")
     dashboard_require_view_token: bool = False
     dashboard_view_token: str = ""
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     tradier_read_only: bool = True
     tradier_stream_enabled: bool = False
 
-    engine_name: str = "SPY Constituent Alpha"
+    engine_name: str = "Alpha-SPY"
     engine_version: str = "2.0.0"
 
     websocket_interval_seconds: float = 1.0

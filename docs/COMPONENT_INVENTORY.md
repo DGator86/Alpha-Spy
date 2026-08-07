@@ -4,19 +4,19 @@
 
 | Service | Installed unit | Responsibility |
 |---|---|---|
-| Market collector | `spy-der-market.service` | Constituent, benchmark, SPY, option-chain, IV and skew collection; immutable market tape |
-| Forecast and decision engine | `spy-der-engine.service` | Features, 15-minute distributions, strategy candidates, risk gates, decisions and execution handoff |
-| Confirmation engine | `spy-der-confirmation.service` | First post-target realization, historical revision checks, forecast scores and candidate counterfactuals |
-| Settlement monitor | `spy-der-settlement.service` | Executable closing marks, MFE/MAE, stops, targets, forced flat and managed closing orders |
-| Decision API | `spy-der-decision.service` | Local health/state API and authenticated supervisory controls |
-| Command Center GUI | `spy-der-dashboard.service` | Browser dashboard, live WebSocket state, confirmation tape, trade monitor, audit lab and operations |
-| Dojo governance | `spy-der-dojo.service` | After-hours calibration, strategy and champion/challenger evidence report |
-| Google Drive backup | `spy-der-backup.service` | Online SQLite snapshots, compression, raw-data copy and manifests |
+| Market collector | `alpha-spy-market.service` | Constituent, benchmark, SPY, option-chain, IV and skew collection; immutable market tape |
+| Forecast and decision engine | `alpha-spy-engine.service` | Features, 15-minute distributions, strategy candidates, risk gates, decisions and execution handoff |
+| Confirmation engine | `alpha-spy-confirmation.service` | First post-target realization, historical revision checks, forecast scores and candidate counterfactuals |
+| Settlement monitor | `alpha-spy-settlement.service` | Executable closing marks, MFE/MAE, stops, targets, forced flat and managed closing orders |
+| Decision API | `alpha-spy-decision.service` | Local health/state API and authenticated supervisory controls |
+| Command Center GUI | `alpha-spy-dashboard.service` | Browser dashboard, live WebSocket state, confirmation tape, trade monitor, audit lab and operations |
+| Dojo governance | `alpha-spy-dojo.service` | After-hours calibration, strategy and champion/challenger evidence report |
+| Google Drive backup | `alpha-spy-backup.service` | Online SQLite snapshots, compression, raw-data copy and manifests |
 
 ## Timers
 
-- `spy-der-dojo.timer`: weekdays at 6:30 PM Eastern.
-- `spy-der-backup.timer`: every day at 5:00 PM Eastern.
+- `alpha-spy-dojo.timer`: weekdays at 6:30 PM Eastern.
+- `alpha-spy-backup.timer`: every day at 5:00 PM Eastern.
 
 ## Trading and research modules
 
@@ -34,19 +34,19 @@
 
 ## Persistent data
 
-The installer preserves existing data and adds isolated v2 databases:
+The installer creates the Alpha-SPY data roots:
 
-- `/var/lib/spy-der/journal/suite-v2.db`
-- `/var/lib/spy-der/dashboard/command-center-v2.sqlite`
-- `/var/lib/spy-der/market/`
-- `/var/lib/spy-der/candidates/`
-- `/var/lib/spy-der/audit/`
-- `/var/lib/spy-der/positions/`
-- `/var/lib/spy-der/reports/dojo/`
-- `/var/lib/spy-der/models/`
-- `/var/lib/spy-der/reference/`
+- `/var/lib/alpha-spy/journal/alpha-spy.db`
+- `/var/lib/alpha-spy/dashboard/command-center.sqlite`
+- `/var/lib/alpha-spy/market/`
+- `/var/lib/alpha-spy/candidates/`
+- `/var/lib/alpha-spy/audit/`
+- `/var/lib/alpha-spy/positions/`
+- `/var/lib/alpha-spy/reports/dojo/`
+- `/var/lib/alpha-spy/models/`
+- `/var/lib/alpha-spy/reference/`
 
-The legacy roots `/var/lib/spy-der` and `/var/lib/zerodte` are included in the Google Drive backup without deleting source or destination data.
+The data root `/var/lib/alpha-spy` is included in the Google Drive backup without deleting source or destination data.
 
 ## Installation and operating tools
 

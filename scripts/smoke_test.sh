@@ -21,7 +21,7 @@ cd "$ROOT_DIR"
 PYTHON="${PYTHON:-python3}"
 WHEEL="${1:-}"
 if [[ -z "$WHEEL" ]]; then
-  WHEEL="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'spy_constituent_alpha_suite-*.whl' 2>/dev/null | sort | tail -n1)"
+  WHEEL="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'alpha_spy-*.whl' 2>/dev/null | sort | tail -n1)"
 fi
 [[ -n "$WHEEL" && -f "$WHEEL" ]] || {
   echo "No wheel found. Run 'make build' first, or pass a wheel path." >&2
@@ -84,8 +84,8 @@ echo "==> [1/6] Installing the wheel into an isolated virtualenv"
 VENV_PY="$WORK/venv/bin/python"
 "$VENV_PY" -m pip install --quiet --upgrade pip wheel
 "$VENV_PY" -m pip install --quiet "$WHEEL"
-SPY_DER="$WORK/venv/bin/spy-der"
-[[ -x "$SPY_DER" ]] || { echo "spy-der console script missing from the wheel" >&2; exit 1; }
+ALPHA_SPY_BIN="$WORK/venv/bin/alpha-spy"
+[[ -x "$ALPHA_SPY_BIN" ]] || { echo "alpha-spy console script missing from the wheel" >&2; exit 1; }
 
 echo
 echo "==> [2/6] Writing a hermetic configuration"
@@ -107,8 +107,8 @@ cfg = yaml.safe_load(Path(src).read_text(encoding="utf-8"))
 
 cfg["paths"] = {
     "state_root": state_root,
-    "database": f"{state_root}/journal/suite-v2.db",
-    "dashboard_database": f"{state_root}/dashboard/command-center-v2.sqlite",
+    "database": f"{state_root}/journal/alpha-spy.db",
+    "dashboard_database": f"{state_root}/dashboard/command-center.sqlite",
     "universe_cache": f"{state_root}/reference/universe.csv",
     "model_dir": f"{state_root}/models",
     "report_dir": f"{state_root}/reports",
@@ -134,11 +134,11 @@ PY
 echo "    config: $CONFIG"
 echo "    state root: $STATE_ROOT"
 
-RUN=("$SPY_DER" --config "$CONFIG" --state-root "$STATE_ROOT")
+RUN=("$ALPHA_SPY_BIN" --config "$CONFIG" --state-root "$STATE_ROOT")
 
 echo
 echo "==> [3/6] Configuration, database and universe"
-check "spy-der doctor (config + PRAGMA quick_check)" "${RUN[@]}" doctor
+check "alpha-spy doctor (config + PRAGMA quick_check)" "${RUN[@]}" doctor
 check "universe loads from local CSV" "${RUN[@]}" universe-refresh --force
 
 echo

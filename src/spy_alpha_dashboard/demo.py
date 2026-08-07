@@ -21,7 +21,7 @@ def base_state(now: datetime, tick: int = 0) -> dict[str, Any]:
     pnl = 42.0 + math.sin(phase * 1.4) * 17.0
     return {
         "timestamp": iso(now),
-        "engine": {"name": "SPY Constituent Alpha", "version": "2.0.0", "environment": "SANDBOX", "mode": "PAPER"},
+        "engine": {"name": "Alpha-SPY", "version": "2.0.0", "environment": "SANDBOX", "mode": "PAPER"},
         "session": {"market_open": True, "exchange_time": now.astimezone().strftime("%H:%M:%S"), "entry_window": "OPEN", "forced_flat_time": "15:55 ET"},
         "health": {
             "state": "GREEN" if trust >= 0.75 else "YELLOW",

@@ -41,7 +41,7 @@ jobs:
           tag="${{ inputs.tag || github.ref_name }}"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "name=spy-constituent-alpha-suite-v$version" >> "$GITHUB_OUTPUT"
+          echo "name=alpha-spy-v$version" >> "$GITHUB_OUTPUT"
           # A tag that disagrees with pyproject.toml would publish artifacts
           # whose filenames do not match the release they are attached to.
           if [[ "$tag" != "v$version" ]]; then
@@ -79,7 +79,7 @@ jobs:
           set -Eeuo pipefail
           cd dist/release
           {
-            echo "SPY Constituent Alpha Suite $VERSION"
+            echo "Alpha-SPY $VERSION"
             echo
             echo "Install on Ubuntu 24.04:"
             echo
@@ -117,6 +117,6 @@ jobs:
               "$NAME.tar.gz" "$NAME.tar.gz.sha256" \
               "$NAME.zip" "$NAME.zip.sha256" \
               RELEASE_MANIFEST.sha256 \
-              --title "SPY Constituent Alpha Suite $VERSION" \
+              --title "Alpha-SPY $VERSION" \
               --notes-file notes.md
           fi

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-echo '=== SPY Constituent Alpha Suite ==='
-/opt/spy-der/venv/bin/spy-der --config /etc/spy-der/config.yaml doctor || true
+echo '=== Alpha-SPY ==='
+/opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml doctor || true
 
 echo
 echo '=== Services ==='
 for unit in market engine confirmation settlement decision dashboard; do
-  printf '%-30s %s\n' "spy-der-$unit.service" "$(systemctl is-active "spy-der-$unit.service" 2>/dev/null || true)"
+  printf '%-30s %s\n' "alpha-spy-$unit.service" "$(systemctl is-active "alpha-spy-$unit.service" 2>/dev/null || true)"
 done
 
 echo
 echo '=== Timers ==='
-systemctl list-timers --all | grep -E 'spy-der-(dojo|backup)' || true
+systemctl list-timers --all | grep -E 'alpha-spy-(dojo|backup)' || true
 
 echo
 echo '=== Local APIs ==='
@@ -26,4 +26,4 @@ free -h
 
 echo
 echo '=== Recent critical logs ==='
-journalctl -p err -u 'spy-der-*' --since '24 hours ago' --no-pager -n 50 || true
+journalctl -p err -u 'alpha-spy-*' --since '24 hours ago' --no-pager -n 50 || true

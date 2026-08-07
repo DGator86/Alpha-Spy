@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Alpha-SPY dojo after market close
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 18:30:00 America/New_York
+Persistent=true
+AccuracySec=1m
+Unit=alpha-spy-dojo.service
+
+[Install]
+WantedBy=timers.target

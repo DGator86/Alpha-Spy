@@ -1,12 +1,12 @@
 paths:
-  state_root: /var/lib/spy-der
-  database: /var/lib/spy-der/journal/suite-v2.db
-  dashboard_database: /var/lib/spy-der/dashboard/command-center-v2.sqlite
-  universe_cache: /var/lib/spy-der/reference/universe.csv
-  model_dir: /var/lib/spy-der/models
-  report_dir: /var/lib/spy-der/reports
-  log_dir: /var/log/spy-der
-  production_sentinel: /etc/spy-der/PRODUCTION_UNLOCKED
+  state_root: /var/lib/alpha-spy
+  database: /var/lib/alpha-spy/journal/alpha-spy.db
+  dashboard_database: /var/lib/alpha-spy/dashboard/command-center.sqlite
+  universe_cache: /var/lib/alpha-spy/reference/universe.csv
+  model_dir: /var/lib/alpha-spy/models
+  report_dir: /var/lib/alpha-spy/reports
+  log_dir: /var/log/alpha-spy
+  production_sentinel: /etc/alpha-spy/PRODUCTION_UNLOCKED
 
 tradier:
   environment: sandbox
@@ -18,9 +18,11 @@ tradier:
   stream_enabled: false
 
 universe:
-  source: ishares_ivv
-  source_url: https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
-  local_csv: /etc/spy-der/universe.csv
+  source: ssga_spy
+  source_url: https://www.ssga.com/us/en/institutional/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spy.xlsx
+  fallback_source_urls:
+    - https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
+  local_csv: /etc/alpha-spy/universe.csv
   refresh_hour_et: 7
   maximum_age_hours: 36
   minimum_symbols: 450
@@ -103,7 +105,7 @@ trading:
   limit_price_steps: 4
   limit_price_wait_seconds: 8
   cancel_confirm_seconds: 15
-  tag_prefix: SPYDER
+  tag_prefix: ALPHASPY
 
 audit:
   enabled: true

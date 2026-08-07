@@ -1,6 +1,6 @@
 # Coding Agent Prompt
 
-You are extending the `spy-constituent-alpha` repository. Preserve its central separation between the physical (`P`) distribution used for expected outcomes and the risk-neutral (`Q`) distribution used for option valuation.
+You are extending the `alpha-spy` repository. Preserve its central separation between the physical (`P`) distribution used for expected outcomes and the risk-neutral (`Q`) distribution used for option valuation.
 
 ## Immediate assignment
 

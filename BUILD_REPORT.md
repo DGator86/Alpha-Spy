@@ -2,7 +2,7 @@
 
 ## Release
 
-- Product: SPY Constituent Alpha Suite
+- Product: Alpha-SPY
 - Version: 2.0.0
 - Build date: 2026-08-06
 - Target platform: Ubuntu 24.04 LTS, single VPS
@@ -13,7 +13,7 @@
 
 This release contains the complete source tree, bundled application wheel, Ubuntu installer, systemd service topology, secure browser GUI, local decision API, market and option-data collection, constituent feature and forecasting engine, defined-risk strategy generator, risk controller, guarded execution workflow, settlement monitor, immutable T+15 confirmation tape, model-governance Dojo, Google Drive backup tooling, research framework, tests, operating documentation, upgrade and rollback procedures, and a standalone GUI preview.
 
-The installer preserves existing data under `/var/lib/spy-der` and `/var/lib/zerodte`, preserves the prior `/opt/spy-der` installation and configuration, and creates isolated v2 database files rather than overwriting recognized legacy databases.
+The installer performs a fresh installation. It rebuilds `/opt/alpha-spy` and regenerates `/etc/alpha-spy`, leaves trading data under `/var/lib/alpha-spy` in place, and touches only Alpha-SPY-owned paths, units and the `alphaspy` service account.
 
 ## Automated verification completed
 
@@ -35,7 +35,7 @@ The suite tests cover runtime configuration, SQLite schemas, demo market ingesti
 ### Built wheel
 
 ```text
-spy_constituent_alpha_suite-2.0.0-py3-none-any.whl
+alpha_spy-2.0.0-py3-none-any.whl
 SHA-256: adfed16c5025ed744fd1884711df35d2a4dade5783b52104b3399b972d2fd50b
 ```
 
@@ -94,17 +94,17 @@ The Google Drive backup program was exercised with a temporary live SQLite datab
 
 The installer deploys and manages:
 
-- `spy-der-market.service`
-- `spy-der-engine.service`
-- `spy-der-confirmation.service`
-- `spy-der-settlement.service`
-- `spy-der-decision.service`
-- `spy-der-dashboard.service`
-- `spy-der-dojo.service`
-- `spy-der-dojo.timer`
-- `spy-der-backup.service`
-- `spy-der-backup.timer`
-- `spy-der.target`
+- `alpha-spy-market.service`
+- `alpha-spy-engine.service`
+- `alpha-spy-confirmation.service`
+- `alpha-spy-settlement.service`
+- `alpha-spy-decision.service`
+- `alpha-spy-dashboard.service`
+- `alpha-spy-dojo.service`
+- `alpha-spy-dojo.timer`
+- `alpha-spy-backup.service`
+- `alpha-spy-backup.timer`
+- `alpha-spy.target`
 
 The dashboard and decision API bind only to `127.0.0.1`. The intended access path is an SSH tunnel. View, administrator, and ingestion credentials are separate.
 
@@ -127,7 +127,7 @@ The supplied configuration is fail-closed:
 - Forced-flat target at 15:55 Eastern
 - Separate production sentinel required
 
-Production submission cannot be enabled only through the GUI. It requires an explicit configuration change, production account credentials, paper mode removal, order submission enablement, and `/etc/spy-der/PRODUCTION_UNLOCKED`.
+Production submission cannot be enabled only through the GUI. It requires an explicit configuration change, production account credentials, paper mode removal, order submission enablement, and `/etc/alpha-spy/PRODUCTION_UNLOCKED`.
 
 ## Deliberate limitations and unverified items
 
@@ -141,13 +141,13 @@ The constituent universe uses an iShares IVV holdings source with a bundled fall
 
 ```bash
 cd /root
-tar -xzf spy-constituent-alpha-suite-v2.0.0.tar.gz
-cd spy-constituent-alpha-suite-v2.0.0
+tar -xzf alpha-spy-v2.0.0.tar.gz
+cd alpha-spy-v2.0.0
 sudo bash install.sh
 ```
 
 After installation, credentials and tunnel instructions are written to:
 
 ```text
-/root/spy-der-credentials.txt
+/root/alpha-spy-credentials.txt
 ```
