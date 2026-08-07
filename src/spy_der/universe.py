@@ -56,6 +56,17 @@ def normalize_symbol(symbol: str) -> str:
     return symbol
 
 
+def _clean_sector(value: object) -> str:
+    """Normalise a missing sector.
+
+    SSGA's daily holdings sheet carries "-" in every Sector cell, which would
+    otherwise be stored verbatim. The live runtime records sector but does not
+    compute on it, so an honest "Unknown" is preferable to a stray dash.
+    """
+    text = str(value or "").strip()
+    return text if text and text not in {"-", "--", "N/A", "n/a"} else "Unknown"
+
+
 def _parse_csv_text(text: str) -> list[Holding]:
     # iShares CSVs contain metadata before the header. Locate the row beginning with Ticker.
     lines = text.splitlines()
@@ -101,7 +112,7 @@ def _parse_csv_text(text: str) -> list[Holding]:
             Holding(
                 symbol=ticker,
                 name=str(row.get(name_col, ticker)).strip() if name_col else ticker,
-                sector=str(row.get(sector_col, "Unknown")).strip() if sector_col else "Unknown",
+                sector=_clean_sector(row.get(sector_col)) if sector_col else "Unknown",
                 weight=weight,
             )
         )
@@ -114,6 +125,31 @@ def _parse_csv_text(text: str) -> list[Holding]:
     if 0.95 <= total <= 1.05:
         holdings = [Holding(h.symbol, h.name, h.sector, h.weight / total) for h in holdings]
     return holdings
+
+
+def _parse_holdings_xlsx(payload: bytes) -> list[Holding]:
+    """Parse an SSGA-style holdings workbook.
+
+    SSGA publishes SPY's own holdings as xlsx with a preamble above the header
+    row, so the header is located rather than assumed.
+    """
+    raw = pd.read_excel(io.BytesIO(payload), header=None)
+    header_row = None
+    for index in range(min(25, len(raw))):
+        cells = [str(cell).strip().lower() for cell in raw.iloc[index].tolist()]
+        if "ticker" in cells and any("weight" in cell for cell in cells):
+            header_row = index
+            break
+    if header_row is None:
+        raise ValueError("Could not locate the Ticker/Weight header in the holdings workbook")
+
+    frame = pd.read_excel(io.BytesIO(payload), header=header_row)
+    frame.columns = [str(column).strip() for column in frame.columns]
+    # _parse_csv_text locates the header by a row starting with "Ticker";
+    # SSGA orders the sheet Name, Ticker, ... so move it to the front.
+    ticker = next(c for c in frame.columns if c.strip().lower() == "ticker")
+    frame = frame[[ticker, *[c for c in frame.columns if c != ticker]]]
+    return _parse_csv_text(frame.to_csv(index=False))
 
 
 def read_local_csv(path: Path) -> list[Holding]:
@@ -165,40 +201,103 @@ class UniverseProvider:
         age = datetime.now(UTC).timestamp() - path.stat().st_mtime
         return age <= self.config.universe.maximum_age_hours * 3600
 
+    def _meets_minimum(self, holdings: list[Holding]) -> bool:
+        return (
+            len(holdings) >= self.config.universe.minimum_symbols
+            and sum(h.weight for h in holdings) >= self.config.universe.minimum_covered_weight
+        )
+
     def refresh(self, force: bool = False) -> list[Holding]:
+        # A cached universe is only reusable if it still satisfies the
+        # configured coverage. The previous `min(20, minimum_symbols)` meant a
+        # 20-symbol cache counted as fresh even at a minimum of 450, so a
+        # single failed fetch pinned the system to a stub universe until the
+        # cache aged out -- with entries blocked the whole time.
         if not force and self.cache_is_fresh():
-            holdings = read_local_csv(self.config.paths.universe_cache)
-            if len(holdings) >= min(20, self.config.universe.minimum_symbols):
-                return holdings
+            cached = read_local_csv(self.config.paths.universe_cache)
+            if self._meets_minimum(cached):
+                return cached
 
         source = self.config.universe.source
-        holdings: list[Holding]
+        holdings: list[Holding] = []
+        errors: list[str] = []
         if source == "local_csv":
             holdings = read_local_csv(self.config.universe.local_csv)
         elif source == "fallback":
             holdings = list(FALLBACK_HOLDINGS)
         else:
-            try:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 SPY-Constituent-Alpha/2.0",
-                    "Accept": "text/csv,text/plain,*/*",
-                }
-                with httpx.Client(timeout=45.0, follow_redirects=True, headers=headers) as client:
-                    response = client.get(self.config.universe.source_url)
-                    response.raise_for_status()
-                holdings = _parse_csv_text(response.text)
-            except Exception:
-                if self.config.paths.universe_cache.exists():
-                    holdings = read_local_csv(self.config.paths.universe_cache)
-                elif self.config.universe.local_csv.exists():
-                    holdings = read_local_csv(self.config.universe.local_csv)
-                else:
-                    holdings = list(FALLBACK_HOLDINGS)
+            for label, url in self._remote_sources():
+                try:
+                    holdings = self._fetch(url)
+                    break
+                except Exception as exc:
+                    errors.append(f"{label}: {exc}")
+
+            if not self._meets_minimum(holdings):
+                # Prefer any on-disk universe that actually satisfies coverage
+                # over a short remote answer.
+                for label, path in (
+                    ("cache", self.config.paths.universe_cache),
+                    ("local_csv", self.config.universe.local_csv),
+                ):
+                    if not path.exists():
+                        continue
+                    try:
+                        candidate = read_local_csv(path)
+                    except Exception as exc:
+                        errors.append(f"{label}: {exc}")
+                        continue
+                    if self._meets_minimum(candidate):
+                        holdings = candidate
+                        break
+                    if not holdings:
+                        holdings = candidate
+
+        if not holdings:
+            holdings = list(FALLBACK_HOLDINGS)
 
         if not holdings:
             raise RuntimeError("Universe is empty")
+
+        # Record why coverage is short so the health check and the operator see
+        # a reason rather than an unexplained blocked session.
+        self.last_errors = errors
+        self.meets_minimum = self._meets_minimum(holdings)
         write_compact_csv(self.config.paths.universe_cache, holdings)
         return holdings
+
+    def _remote_sources(self) -> list[tuple[str, str]]:
+        """The configured source first, then any declared alternates."""
+        sources = [("source_url", self.config.universe.source_url)]
+        sources.extend(
+            (f"fallback_url[{i}]", url)
+            for i, url in enumerate(self.config.universe.fallback_source_urls)
+        )
+        return [(label, url) for label, url in sources if url]
+
+    @staticmethod
+    def _fetch(url: str) -> list[Holding]:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            ),
+            "Accept": "text/csv,application/vnd.ms-excel,text/plain,*/*",
+        }
+        with httpx.Client(timeout=45.0, follow_redirects=True, headers=headers) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            body = response.content
+
+        # A 200 is not enough. iShares answers a blocked server-side fetch with
+        # its product page under `Content-Type: text/csv`, so the status and
+        # the header both lie; only the body settles it.
+        if body[:2] == b"PK":
+            return _parse_holdings_xlsx(body)
+        text = body.decode("utf-8-sig", errors="replace")
+        if re.match(r"\s*<(?:!doctype|html)\b", text, re.I):
+            raise ValueError(f"{url} returned an HTML document rather than holdings data")
+        return _parse_csv_text(text)
 
     def get(self) -> list[Holding]:
         return self.refresh(force=False)

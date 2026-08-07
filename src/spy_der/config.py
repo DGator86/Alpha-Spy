@@ -42,10 +42,20 @@ class TradierConfig(BaseModel):
 
 
 class UniverseConfig(BaseModel):
-    source: Literal["ishares_ivv", "local_csv", "fallback"] = "ishares_ivv"
+    # SSGA publishes SPY's own holdings, which is the correct basket for a
+    # system trading SPY, and it answers a server-side fetch. The iShares IVV
+    # endpoint returns its product page under a text/csv content type when
+    # fetched from a server, so it is kept only as an alternate.
+    source: Literal["ssga_spy", "ishares_ivv", "local_csv", "fallback"] = "ssga_spy"
     source_url: str = (
-        "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/"
-        "1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund"
+        "https://www.ssga.com/us/en/institutional/library-content/products/"
+        "fund-data/etfs/us/holdings-daily-us-en-spy.xlsx"
+    )
+    fallback_source_urls: list[str] = Field(
+        default_factory=lambda: [
+            "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/"
+            "1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund",
+        ]
     )
     local_csv: Path = Path("/etc/spy-der/universe.csv")
     refresh_hour_et: int = 7

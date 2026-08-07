@@ -60,14 +60,19 @@ def test_world_driver_runs_and_writes_a_report(name, tmp_path):
     assert report.stat().st_size > 0, f"{name} wrote an empty REPORT.md"
 
 
-def test_synthetic_demo_reproduces_its_committed_output():
+def test_synthetic_demo_reproduces_its_committed_output(tmp_path):
     """Golden check on the committed synthetic_edge_output.csv.
 
-    The demo is seeded, so its edge table is deterministic. It writes next to
-    the script rather than to a chosen directory, so this restores the file
-    afterwards and compares instead of leaving whatever it produced behind.
-    A mismatch means the pricing, scanning or ranking path changed numerically.
+    The demo is seeded, so its edge table is reproducible. Comparison is
+    numeric rather than byte-exact: repr of a float differs in the last digit
+    or two between interpreter and BLAS versions, which says nothing about the
+    pricing path. Structure is compared exactly; values to a tight tolerance.
+
+    The demo writes next to the script rather than to a chosen directory, so
+    the committed file is restored afterwards.
     """
+    import pandas as pd
+
     golden = EXAMPLES / "synthetic_edge_output.csv"
     original = golden.read_bytes()
     try:
@@ -77,10 +82,22 @@ def test_synthetic_demo_reproduces_its_committed_output():
             f"--- stderr ---\n{result.stderr[-2000:]}"
         )
         assert "Saved:" in result.stdout
-        produced = golden.read_bytes()
+        produced_bytes = golden.read_bytes()
     finally:
         golden.write_bytes(original)
-    assert produced == original, (
-        "run_synthetic_demo no longer reproduces examples/synthetic_edge_output.csv; "
-        "the pricing/scanning/ranking path changed numerically"
-    )
+
+    produced_path = tmp_path / "produced.csv"
+    produced_path.write_bytes(produced_bytes)
+    produced = pd.read_csv(produced_path)
+    expected = pd.read_csv(golden)
+
+    assert list(produced.columns) == list(expected.columns), "edge table columns changed"
+    assert len(produced) == len(expected), "number of surviving candidates changed"
+
+    for column in expected.columns:
+        if pd.api.types.is_numeric_dtype(expected[column]):
+            pd.testing.assert_series_equal(
+                produced[column], expected[column], check_exact=False, rtol=1e-6, atol=1e-9
+            )
+        else:
+            pd.testing.assert_series_equal(produced[column], expected[column])

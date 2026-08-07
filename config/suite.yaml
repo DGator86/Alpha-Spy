@@ -18,8 +18,10 @@ tradier:
   stream_enabled: false
 
 universe:
-  source: ishares_ivv
-  source_url: https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
+  source: ssga_spy
+  source_url: https://www.ssga.com/us/en/institutional/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spy.xlsx
+  fallback_source_urls:
+    - https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
   local_csv: /etc/spy-der/universe.csv
   refresh_hour_et: 7
   maximum_age_hours: 36
