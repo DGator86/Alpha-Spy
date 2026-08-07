@@ -1,0 +1,23 @@
+[Unit]
+Description=SPY Constituent Alpha prediction and decision engine
+Wants=network-online.target spy-der-market.service spy-der-dashboard.service
+After=network-online.target spy-der-market.service spy-der-dashboard.service
+PartOf=spy-der.target
+
+[Service]
+Type=simple
+User=spyder
+Group=spyder
+EnvironmentFile=-/etc/spy-der/secrets.env
+ExecStart=/opt/spy-der/venv/bin/spy-der --config /etc/spy-der/config.yaml engine
+Restart=always
+RestartSec=5
+Nice=-2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/spy-der /var/log/spy-der
+UMask=0077
+
+[Install]
+WantedBy=spy-der.target

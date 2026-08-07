@@ -1,0 +1,22 @@
+[Unit]
+Description=SPY Constituent Alpha local decision API
+Wants=network-online.target
+After=network-online.target
+PartOf=spy-der.target
+
+[Service]
+Type=simple
+User=spyder
+Group=spyder
+EnvironmentFile=-/etc/spy-der/secrets.env
+ExecStart=/opt/spy-der/venv/bin/spy-der --config /etc/spy-der/config.yaml decision-service --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/spy-der /var/log/spy-der
+UMask=0077
+
+[Install]
+WantedBy=spy-der.target

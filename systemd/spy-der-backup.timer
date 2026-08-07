@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SPY Constituent Alpha Google Drive backup daily at 5 PM Eastern
+
+[Timer]
+OnCalendar=*-*-* 17:00:00 America/New_York
+Persistent=true
+AccuracySec=1m
+Unit=spy-der-backup.service
+
+[Install]
+WantedBy=timers.target

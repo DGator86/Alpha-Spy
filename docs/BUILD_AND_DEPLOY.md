@@ -1,0 +1,233 @@
+# Build and Deploy
+
+How a change in this repository becomes a running suite on the VPS.
+
+```text
+repository  ──make verify──►  wheel + archives  ──make release──►  dist/release/
+     │                                                                   │
+     │  push / PR                                                        │  tag vX.Y.Z
+     ▼                                                                   ▼
+  CI workflow                                                    Release workflow
+  (static, tests, package, smoke)                                (GitHub Release + checksums)
+     │                                                                   │
+     └──────────────────────► Deploy workflow ◄──────────────────────────┘
+                              (manual, gated)
+                                     │
+                                     ▼
+                          scripts/deploy_vps.sh ──ssh──► install.sh on the VPS
+```
+
+## Prerequisites
+
+- Python 3.11 or newer
+- `make`, `tar`, `gzip`, `zip`, `sha256sum`
+- `node` (dashboard JavaScript syntax check) and `systemd-analyze` (unit
+  verification) — both optional locally; `make lint` skips them with a notice
+  and CI runs them unconditionally
+
+```bash
+make venv
+source .venv/bin/activate
+```
+
+## Local build
+
+| Command | What it does |
+|---|---|
+| `make lint` | Compiles `src/`, `tests/`, `examples/`; `bash -n` over the installer and operator scripts; `node --check` on the dashboard JavaScript; `systemd-analyze verify` on every unit and timer |
+| `make test` | Runs the test suite (`PYTHONPATH=src:. pytest -q`) |
+| `make build` | Builds the application wheel into `dist/` |
+| `make smoke` | Installs the built wheel into a throwaway virtualenv and exercises it end to end |
+| `make verify` | All four, in order |
+| `make release` | Builds the distributable archives into `dist/release/` |
+| `make verify-release` | Re-checks the built archives against their checksums and manifest |
+
+### What the smoke test covers
+
+`scripts/smoke_test.sh` runs against the *installed wheel*, not the source
+tree, so it catches packaging mistakes the test suite cannot. It is fully
+hermetic — no Tradier credentials and no network. The market collector runs in
+demo mode (`market.demo_when_unconfigured`) and the constituent universe is
+read from the bundled `config/universe.csv` rather than the iShares endpoint.
+
+It verifies configuration load, `PRAGMA quick_check`, universe loading, a demo
+market cycle, a feature/prediction/decision cycle, confirmation maturity,
+dashboard state assembly, both API servers starting, and the dashboard's token
+separation: no token → 401, view token → 200, view token on an administrative
+command → 403, admin token → 200, and the queued command applied by the next
+engine cycle.
+
+### Release archives
+
+`scripts/build_release.sh` stages an explicit file list — the same layout the
+v2.0.0 release shipped — and produces:
+
+```text
+dist/release/spy-constituent-alpha-suite-v<version>.tar.gz  (+ .sha256)
+dist/release/spy-constituent-alpha-suite-v<version>.zip     (+ .sha256)
+dist/release/RELEASE_MANIFEST.sha256
+```
+
+Repository-only material (`.github/`, `.gitignore`, `release/`, working notes)
+is deliberately excluded. The bundled wheel is placed at `dist/` *inside* the
+archive, which is where `scripts/install_vps.sh` looks for it.
+
+Builds are reproducible: entries are sorted, ownership is normalised, and every
+timestamp is pinned to `SOURCE_DATE_EPOCH` (defaulting to the HEAD commit
+time). Building the same tree twice yields byte-identical archives. Set
+`SOURCE_DATE_EPOCH` explicitly to reproduce an older build.
+
+`RELEASE_MANIFEST.sha256` covers every file in the archive except itself.
+`scripts/verify_release.sh <archive>` extracts the archive, checks the sidecar
+checksum, verifies every file against the manifest, confirms no unhashed files
+were added, and asserts the installer's prerequisites are present.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+
+| Job | Gate | Contents |
+|---|---|---|
+| `static` | blocking | Python compilation, shell syntax, dashboard JavaScript, systemd units |
+| `test` | blocking | Test suite on Python 3.11 and 3.12 |
+| `package` | blocking | `make release`, `make verify-release`, `make smoke`; uploads archives as build artifacts (14 days) |
+| `lint` | advisory | `ruff check`, reported but non-blocking |
+
+Ruff is advisory because the v2.0.0 source carries pre-existing style findings
+(unused imports, `datetime.timezone.utc` over `datetime.UTC`, blind excepts).
+Clearing them is a separate change; until then the job keeps the drift visible
+without blocking merges.
+
+Runners are pinned to `ubuntu-24.04` to match the deployment target.
+
+## Publishing a release
+
+1. Set `version` in `pyproject.toml` and update `CHANGELOG.md`.
+2. Merge to `main`.
+3. Tag and push:
+
+   ```bash
+   git tag v2.1.0
+   git push origin v2.1.0
+   ```
+
+`.github/workflows/release.yml` then re-runs lint, tests, the release build,
+archive verification and the smoke test, and publishes a GitHub Release with
+both archives, both `.sha256` sidecars and `RELEASE_MANIFEST.sha256`.
+
+The workflow fails if the tag does not match the version in `pyproject.toml`,
+so a release's artifacts always match the tag they hang off. Re-running against
+an existing tag replaces the assets and rewrites the notes.
+
+Verify a published release before installing it:
+
+```bash
+curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/spy-constituent-alpha-suite-v2.1.0.tar.gz
+curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/spy-constituent-alpha-suite-v2.1.0.tar.gz.sha256
+sha256sum -c spy-constituent-alpha-suite-v2.1.0.tar.gz.sha256
+```
+
+## Deploying to the VPS
+
+Both paths run the suite's own `install.sh`, which stops the running services,
+preserves `/var/lib/spy-der` and `/var/lib/zerodte`, moves the prior
+`/opt/spy-der` aside, installs the wheel into a fresh virtualenv, reinstalls
+the systemd units, and restarts everything in the shipped fail-closed posture.
+
+Neither path can enable production trading. That still requires the separate,
+deliberate steps in [OPERATIONS.md](OPERATIONS.md) and
+[SECURITY.md](SECURITY.md).
+
+### From a workstation
+
+```bash
+DEPLOY_HOST=203.0.113.10 make deploy
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DEPLOY_HOST` | *(required)* | Target hostname or IP |
+| `DEPLOY_USER` | `root` | SSH user |
+| `DEPLOY_PORT` | `22` | SSH port |
+| `DEPLOY_SSH_KEY` | *(agent / ssh config)* | Private key path |
+| `DEPLOY_REMOTE_DIR` | `/root` | Staging directory on the target |
+| `DEPLOY_ARCHIVE` | *(freshly built)* | Deploy a specific archive instead |
+| `DEPLOY_SKIP_BUILD` | `0` | Reuse the newest archive in `dist/release` |
+| `DEPLOY_ASSUME_YES` | `0` | Skip the interactive confirmation |
+
+`scripts/deploy_vps.sh` builds the release, verifies it locally, checks the
+target has passwordless `sudo` and free space, transfers the archive with its
+checksum, verifies it *again* on the target, runs the installer, and prints
+`scripts/status.sh` output. It asks for the phrase `DEPLOY` before touching the
+running system.
+
+### From GitHub Actions
+
+`.github/workflows/deploy.yml` is `workflow_dispatch` only — never on push,
+tag or schedule — and additionally requires typing `DEPLOY` into the
+confirmation input.
+
+Configure once:
+
+| Secret | Value |
+|---|---|
+| `VPS_HOST` | Target hostname or IP |
+| `VPS_SSH_KEY` | Private key authorised for the deploy user |
+| `VPS_KNOWN_HOSTS` | Output of `ssh-keyscan -p <port> <host>` |
+
+| Variable | Default |
+|---|---|
+| `VPS_USER` | `root` |
+| `VPS_PORT` | `22` |
+| `VPS_REMOTE_DIR` | `/root` |
+
+Host-key checking is enforced: an empty `VPS_KNOWN_HOSTS` fails the run rather
+than falling back to accepting an unknown key.
+
+The job targets the `production-vps` environment. Add required reviewers under
+**Settings → Environments → production-vps** so a deploy needs approval, and
+scope the environment to the branches you deploy from.
+
+### After deploying
+
+```bash
+sudo /opt/spy-der/release/scripts/status.sh
+sudo /opt/spy-der/release/scripts/doctor.sh
+sudo cat /root/spy-der-credentials.txt
+```
+
+Open the Command Center through an SSH tunnel — the dashboard and decision
+APIs bind to `127.0.0.1` and are never exposed directly:
+
+```bash
+ssh -L 8788:127.0.0.1:8788 -L 8787:127.0.0.1:8787 root@YOUR_VPS_IP
+# then browse to http://127.0.0.1:8788
+```
+
+Rolling back is covered in [UPGRADE.md](UPGRADE.md); the installer leaves the
+previous tree at `/opt/spy-der.pre-v2-<timestamp>` and prior configuration
+under `/var/backups/spy-der-pre-v2-<timestamp>`.
+
+## GUI preview
+
+`.github/workflows/pages.yml` publishes
+`preview/standalone-command-center.html` to GitHub Pages on pushes to `main`
+that touch `preview/`. The page is static and self-contained — no live data, no
+credentials, no connection to a running instance — and the workflow fails if it
+ever gains an external resource reference. Enable it once under
+**Settings → Pages → Source: GitHub Actions**.
+
+## Repository layout
+
+```text
+src/            spy_der (suite), spy_constituent_alpha (research), spy_alpha_dashboard (GUI)
+tests/          test suite
+examples/       research drivers
+config/         shipped fail-closed configuration and constituent universe
+scripts/        build, verify, smoke, deploy and operator scripts
+systemd/        service, timer and target units
+docs/           architecture, operations, security, data model, this file
+preview/        standalone GUI preview and screenshot
+release/        archived upstream release drops (immutable record; not a build target)
+dist/           build output — wheel and dist/release/ archives (git-ignored)
+```

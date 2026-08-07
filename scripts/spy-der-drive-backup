@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+export TZ="America/New_York"
+export RCLONE_CONFIG="${RCLONE_CONFIG:-/root/.config/rclone/rclone.conf}"
+HOST="$(hostname -s)"
+REMOTE="${SPY_DER_BACKUP_REMOTE:-gdrive:SPY Trading Backups/$HOST}"
+REMOTE_NAME="${REMOTE%%:*}:"
+DAY="$(date +%F)"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+LOCK="${SPY_DER_BACKUP_LOCK:-/run/lock/spy-der-drive-backup.lock}"
+ROOTS=("${SPY_DER_STATE_ROOT:-/var/lib/spy-der}" "${SPY_DER_LEGACY_ROOT:-/var/lib/zerodte}")
+
+log() {
+  printf '%s %s\n' "$(date -Is)" "$*"
+}
+
+for cmd in rclone python3 zstd find flock timeout df stat awk; do
+  command -v "$cmd" >/dev/null 2>&1 || {
+    log "ERROR missing command: $cmd"
+    exit 1
+  }
+done
+
+[[ -f "$RCLONE_CONFIG" ]] || {
+  log "ERROR rclone configuration missing: $RCLONE_CONFIG"
+  exit 1
+}
+
+rclone about "$REMOTE_NAME" >/dev/null || {
+  log "ERROR Google Drive remote is unavailable: $REMOTE_NAME"
+  exit 1
+}
+
+list_databases() {
+  local root
+  for root in "${ROOTS[@]}"; do
+    [[ -d "$root" ]] || continue
+    find "$root" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print0
+  done
+}
+
+largest_database=0
+database_count=0
+while IFS= read -r -d '' database; do
+  size="$(stat -c '%s' "$database")"
+  ((database_count += 1))
+  (( size > largest_database )) && largest_database="$size"
+done < <(list_databases)
+
+available_space="$(df -PB1 /var/tmp | awk 'NR==2 {print $4}')"
+required_space=$((largest_database + 2147483648))
+
+if [[ "${1:-}" == "--preflight" ]]; then
+  log "Google Drive connection: OK"
+  log "Destination: $REMOTE"
+  log "Databases detected: $database_count"
+  log "Largest database bytes: $largest_database"
+  log "Temporary space available bytes: $available_space"
+  log "Temporary space required bytes: $required_space"
+  echo
+  df -h /var/tmp /var/lib
+  echo
+  while IFS= read -r -d '' database; do
+    stat -c '%s bytes  %n' "$database"
+  done < <(list_databases) | sort -n
+  if (( available_space < required_space )); then
+    log "ERROR insufficient temporary space for the largest SQLite snapshot plus safety margin"
+    exit 1
+  fi
+  log "Preflight complete."
+  exit 0
+fi
+
+if (( available_space < required_space )); then
+  log "ERROR insufficient temporary space: available=$available_space required=$required_space"
+  exit 1
+fi
+
+exec 9>"$LOCK"
+flock -n 9 || {
+  log "Another backup is already running; exiting safely."
+  exit 0
+}
+
+WORK="$(mktemp -d /var/tmp/spy-der-backup.XXXXXX)"
+MANIFEST="$WORK/manifest.txt"
+cleanup() { rm -rf "$WORK"; }
+trap cleanup EXIT
+
+{
+  echo "SPY Constituent Alpha backup"
+  echo "host=$HOST"
+  echo "started_utc=$STAMP"
+  echo "started_eastern=$(date -Is)"
+  echo "remote=$REMOTE"
+  echo "database_count=$database_count"
+  echo "largest_database_bytes=$largest_database"
+  echo
+  df -h /var/tmp /var/lib || true
+  echo
+  rclone version || true
+} >"$MANIFEST"
+
+snapshot_db() {
+  local source="$1" root="$2"
+  local rel label dest compressed remote_daily remote_latest
+  label="$(basename "$root")"
+  rel="${source#${root}/}"
+  dest="$WORK/db/$label/$rel"
+  compressed="$dest.zst"
+  remote_daily="$REMOTE/database-snapshots/daily/$DAY/$label/$rel.zst"
+  remote_latest="$REMOTE/database-snapshots/latest/$label/$rel.zst"
+  mkdir -p "$(dirname "$dest")"
+
+  log "Creating online SQLite snapshot: $source"
+  timeout 4h python3 - "$source" "$dest" <<'PY'
+import sqlite3
+import sys
+import urllib.parse
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+dst.parent.mkdir(parents=True, exist_ok=True)
+if dst.exists():
+    dst.unlink()
+
+uri = "file:" + urllib.parse.quote(str(src), safe="/") + "?mode=ro"
+source = sqlite3.connect(uri, uri=True, timeout=120)
+destination = sqlite3.connect(str(dst), timeout=120)
+source.execute("PRAGMA query_only=ON")
+source.execute("PRAGMA busy_timeout=120000")
+destination.execute("PRAGMA busy_timeout=120000")
+last_bucket = -1
+
+def progress(status: int, remaining: int, total: int) -> None:
+    global last_bucket
+    if total <= 0:
+        return
+    percentage = int(((total - remaining) / total) * 100)
+    bucket = percentage // 10
+    if bucket > last_bucket:
+        last_bucket = bucket
+        print(f"snapshot progress={percentage}% pages={total-remaining}/{total}", flush=True)
+
+try:
+    source.backup(destination, pages=8192, progress=progress, sleep=0.10)
+    destination.commit()
+    result = destination.execute("PRAGMA quick_check").fetchone()
+    if not result or result[0] != "ok":
+        raise RuntimeError(f"quick_check failed: {result}")
+    print("snapshot verified quick_check=ok", flush=True)
+finally:
+    destination.close()
+    source.close()
+PY
+
+  log "Compressing snapshot: $source"
+  zstd -T2 -3 -f "$dest" -o "$compressed"
+  rm -f "$dest"
+
+  log "Uploading dated snapshot: $remote_daily"
+  rclone copyto "$compressed" "$remote_daily" \
+    --drive-chunk-size 64M --retries 5 --low-level-retries 20 \
+    --contimeout 30s --timeout 5m --stats 30s --stats-one-line
+
+  log "Updating latest snapshot: $remote_latest"
+  rclone copyto "$remote_daily" "$remote_latest" \
+    --retries 5 --low-level-retries 20 || \
+  rclone copyto "$compressed" "$remote_latest" \
+    --drive-chunk-size 64M --retries 5 --low-level-retries 20 \
+    --contimeout 30s --timeout 5m
+
+  {
+    echo
+    echo "database_source=$source"
+    echo "database_daily=$remote_daily"
+    echo "database_latest=$remote_latest"
+    rclone lsl "$remote_daily" || true
+  } >>"$MANIFEST"
+
+  rm -f "$compressed"
+  log "Database backup complete: $source"
+}
+
+for root in "${ROOTS[@]}"; do
+  [[ -d "$root" ]] || {
+    log "WARNING source root missing: $root"
+    continue
+  }
+  while IFS= read -r -d '' db; do
+    if [[ "$(head -c 15 "$db" 2>/dev/null || true)" != "SQLite format 3" ]]; then
+      log "WARNING skipping non-SQLite database-like file: $db"
+      continue
+    fi
+    snapshot_db "$db" "$root"
+  done < <(find "$root" -type f \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -print0)
+done
+
+for root in "${ROOTS[@]}"; do
+  [[ -d "$root" ]] || continue
+  label="$(basename "$root")"
+  log "Incrementally copying non-database data: $root"
+  rclone copy "$root" "$REMOTE/raw/$label" \
+    --exclude '*.db' --exclude '*.db-wal' --exclude '*.db-shm' \
+    --exclude '*.sqlite' --exclude '*.sqlite-wal' --exclude '*.sqlite-shm' \
+    --exclude '*.sqlite3' --exclude '*.sqlite3-wal' --exclude '*.sqlite3-shm' \
+    --min-age 2m --create-empty-src-dirs --checkers 4 --transfers 2 \
+    --drive-chunk-size 32M --retries 5 --low-level-retries 20 \
+    --contimeout 30s --timeout 5m --stats 30s --stats-one-line
+  {
+    echo
+    echo "raw_source=$root"
+    echo "raw_destination=$REMOTE/raw/$label"
+  } >>"$MANIFEST"
+done
+
+{
+  echo
+  echo "completed_utc=$(date -u +%Y%m%dT%H%M%SZ)"
+  echo "completed_eastern=$(date -Is)"
+  echo "result=SUCCESS"
+} >>"$MANIFEST"
+
+rclone copyto "$MANIFEST" "$REMOTE/manifests/$STAMP-$HOST.txt" \
+  --retries 5 --low-level-retries 20
+log "Backup complete."

@@ -1,0 +1,50 @@
+{
+  "name": "balanced_expectancy_severity_v1",
+  "status": "locked before new 1000-universe evaluation",
+  "objective": "maximize positive expectancy and profit factor subject to a win-rate floor and explicit conditional-tail limits",
+  "training_universes": 4000,
+  "entry_information_only": true,
+  "eligible_structures": [
+    "LONG_STRANGLE",
+    "LONG_PUT",
+    "LONG_CALL",
+    "LONG_STRADDLE",
+    "BEAR_CALL_CREDIT_SPREAD",
+    "BULL_PUT_CREDIT_SPREAD"
+  ],
+  "models": {
+    "win_probability": "histogram gradient boosting classifier",
+    "expected_winner": "conditional log-PnL histogram gradient boosting regressor",
+    "expected_loser": "conditional log-loss histogram gradient boosting regressor",
+    "loss_q90": "conditional 90th-percentile log-loss gradient boosting regressor"
+  },
+  "gates": {
+    "minimum_probability_win": 0.55,
+    "minimum_predicted_profit_factor": 1.5,
+    "minimum_predicted_expected_pnl": 1.0,
+    "maximum_predicted_90pct_loss": 500.0,
+    "maximum_defined_loss": 900.0,
+    "maximum_trades_per_universe": 1
+  },
+  "portfolio_targets": {
+    "minimum_out_of_sample_win_rate": 0.65,
+    "minimum_out_of_sample_profit_factor": 1.35,
+    "desired_win_rate_band": [0.65, 0.75],
+    "preferred_profit_factor": 1.5
+  },
+  "excluded_future_or_hidden_fields": [
+    "regime",
+    "event_type",
+    "mispricing_type",
+    "injected_edge_active",
+    "actual_remaining_return",
+    "exit_minute",
+    "exit_reason",
+    "exit_spot",
+    "terminal_spot",
+    "exit_cashflow",
+    "pnl",
+    "profitable",
+    "return_on_risk"
+  ]
+}

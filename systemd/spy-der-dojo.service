@@ -1,0 +1,18 @@
+[Unit]
+Description=SPY Constituent Alpha nightly model governance report
+After=spy-der.target
+
+[Service]
+Type=oneshot
+User=spyder
+Group=spyder
+EnvironmentFile=-/etc/spy-der/secrets.env
+ExecStart=/opt/spy-der/venv/bin/spy-der --config /etc/spy-der/config.yaml dojo --recent-days 20
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/spy-der /var/log/spy-der
+UMask=0077

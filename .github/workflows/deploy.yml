@@ -1,0 +1,122 @@
+name: Deploy to VPS
+
+# Manual only. This workflow restarts the live trading suite on the VPS, so it
+# never runs automatically on push, tag or schedule.
+#
+# It deploys the shipped fail-closed posture (Tradier sandbox, paper mode,
+# order submission disabled, no production sentinel) and preserves data under
+# /var/lib/spy-der and /var/lib/zerodte. It cannot enable production trading.
+#
+# Required repository secrets:
+#   VPS_HOST             hostname or IP of the target
+#   VPS_SSH_KEY          private key authorised for VPS_USER on the target
+#   VPS_KNOWN_HOSTS      output of `ssh-keyscan -p <port> <host>`
+#
+# Optional repository variables:
+#   VPS_USER             SSH user (default: root)
+#   VPS_PORT             SSH port (default: 22)
+#   VPS_REMOTE_DIR       staging directory on the target (default: /root)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA to deploy"
+        required: true
+        default: main
+        type: string
+      confirm:
+        description: "Type DEPLOY to confirm restarting the live suite"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build, verify and install
+    runs-on: ubuntu-24.04
+    # Protect this environment with required reviewers so a deploy needs a
+    # second pair of eyes: Settings -> Environments -> production-vps.
+    environment: production-vps
+    steps:
+      - name: Check the confirmation phrase
+        if: inputs.confirm != 'DEPLOY'
+        run: |
+          echo "::error::Confirmation phrase must be exactly DEPLOY"
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip wheel build
+
+      - name: Build the release archives
+        run: make release
+
+      - name: Verify the archives
+        run: make verify-release
+
+      - name: Smoke test the built wheel
+        run: make smoke
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          test -s ~/.ssh/known_hosts || {
+            echo "::error::VPS_KNOWN_HOSTS is empty. Populate it with: ssh-keyscan -p <port> <host>"
+            exit 1
+          }
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.VPS_HOST }}
+          DEPLOY_USER: ${{ vars.VPS_USER || 'root' }}
+          DEPLOY_PORT: ${{ vars.VPS_PORT || '22' }}
+          DEPLOY_REMOTE_DIR: ${{ vars.VPS_REMOTE_DIR || '/root' }}
+          DEPLOY_SSH_KEY: ~/.ssh/deploy_key
+          DEPLOY_SKIP_BUILD: "1"
+          DEPLOY_ASSUME_YES: "1"
+        run: bash scripts/deploy_vps.sh
+
+      - name: Remove SSH material
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Deployed \`${{ inputs.ref }}\`"
+            echo
+            echo "The suite is running in sandbox/paper mode with order submission disabled."
+            echo "Production trading remains locked."
+            echo
+            echo "Open the Command Center through an SSH tunnel:"
+            echo
+            echo '```'
+            echo "ssh -L 8788:127.0.0.1:8788 -L 8787:127.0.0.1:8787 <user>@<host>"
+            echo "# then browse to http://127.0.0.1:8788"
+            echo '```'
+            echo
+            echo "Tokens are on the target at \`/root/spy-der-credentials.txt\`."
+          } >> "$GITHUB_STEP_SUMMARY"

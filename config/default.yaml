@@ -1,0 +1,48 @@
+clock:
+  timezone: America/New_York
+  max_equity_quote_age_ms: 250
+  max_option_quote_age_ms: 750
+  grid_frequency: 1s
+
+universe:
+  min_weight: 0.0001
+  top_n_fast_path: 100
+  minimum_covered_weight: 0.90
+
+lead_lag:
+  lags: [0, 1, 2, 5, 10, 30, 60]
+  ridge_alpha: 10.0
+  minimum_training_rows: 2000
+
+covariance:
+  ewma_halflife: 390
+  shrinkage: 0.35
+  downside_threshold: 0.0
+  minimum_eigenvalue: 1.0e-8
+
+simulation:
+  paths: 30000
+  student_t_df: 7
+  random_seed: 86
+
+risk_premium:
+  lookback_days: 252
+  minimum_observations: 60
+  winsorize_z: 4.0
+
+scanner:
+  min_open_interest: 100
+  min_option_volume: 25
+  max_relative_spread: 0.20
+  min_net_edge_dollars: 0.05
+  min_edge_to_uncertainty: 1.5
+  min_probability_positive_edge: 0.68
+  max_quote_age_ms: 750
+  allow_single_long_options: true
+  allow_vertical_spreads: true
+
+execution:
+  fee_per_contract: 0.65
+  slippage_fraction_of_spread: 0.25
+  minimum_slippage: 0.01
+  contracts_multiplier: 100
