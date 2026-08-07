@@ -1,9 +1,10 @@
 name: CI
 
 on:
+  # Branch pushes are covered by pull_request. Listing both would run every
+  # job twice on any branch that has an open pull request.
   push:
-    branches: ["**"]
-    tags-ignore: ["v*"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -108,8 +109,9 @@ jobs:
     name: Ruff (advisory)
     runs-on: ubuntu-24.04
     # The v2.0.0 source carries pre-existing style findings. This job reports
-    # them without gating the pipeline; the blocking checks live in `static`.
-    continue-on-error: true
+    # them to the run summary without gating; the blocking checks live in
+    # `static`. Findings are deliberately not emitted as inline annotations —
+    # a few hundred of them would bury real review comments in the diff.
     steps:
       - uses: actions/checkout@v4
 
@@ -121,4 +123,19 @@ jobs:
         run: python -m pip install "ruff>=0.8,<1"
 
       - name: Report style findings
-        run: ruff check --output-format=github --statistics src tests examples
+        run: |
+          set -Eeuo pipefail
+          # ruff rejects --statistics combined with a non-default output
+          # format, so the summary is built from the default rendering.
+          ruff check --statistics src tests examples > findings.txt 2>&1 || true
+          total="$(ruff check --quiet --output-format=concise src tests examples 2>/dev/null | wc -l || true)"
+          {
+            echo "## Ruff findings (advisory — does not gate this pipeline)"
+            echo
+            echo "**$total** findings across \`src\`, \`tests\` and \`examples\`."
+            echo
+            echo '```'
+            cat findings.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat findings.txt
