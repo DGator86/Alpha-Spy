@@ -10,7 +10,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "examples"))
 
-from run_1000_world_1m_day import (  # noqa: E402
+from run_1000_world_1m_day import (
     build_summary,
     calibration_table,
     write_report,
@@ -51,7 +51,7 @@ def main() -> None:
     worlds_parts: list[pd.DataFrame] = []
     trades_parts: list[pd.DataFrame] = []
     world_offset = 0
-    for batch_number, (batch_dir, seed) in enumerate(zip(batch_dirs, args.seeds), start=1):
+    for batch_number, (batch_dir, seed) in enumerate(zip(batch_dirs, args.seeds, strict=False), start=1):
         worlds = pd.read_csv(batch_dir / "worlds.csv")
         trades_path = batch_dir / "trades.csv"
         trades = pd.read_csv(trades_path) if trades_path.stat().st_size > 1 else pd.DataFrame()
@@ -94,7 +94,7 @@ def main() -> None:
         )
         summary["robustness"] = {
             "positive_batches": int(sum(row["net_pnl"] > 0 for row in batch_metrics)),
-            "total_batches": int(len(batch_metrics)),
+            "total_batches": len(batch_metrics),
             "batch_metrics": batch_metrics,
             "top_1_trade_pnl_share": float(pnl_ranked.head(1).sum() / total_pnl) if total_pnl else None,
             "top_5_trade_pnl_share": float(pnl_ranked.head(5).sum() / total_pnl) if total_pnl else None,

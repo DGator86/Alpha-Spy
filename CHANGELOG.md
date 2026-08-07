@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Cleared all ruff findings across `src/`, `tests/` and `examples/`, and
+  promoted the ruff CI job from advisory to gating.
+- Pinned the ruff rule set explicitly in `pyproject.toml`. Previously only
+  `line-length` was configured, so ruff applied its full current default
+  (826 rules) and any upgrade could reintroduce findings.
+- `OptionRight` is now a `StrEnum` rather than `(str, Enum)`. This is a
+  behaviour change: `str(OptionRight.CALL)` returns `"C"` instead of
+  `"OptionRight.CALL"`, which is what the codebase's
+  `str(row.right).startswith("C")` idiom already assumed.
+- Removed dead locals in the research drivers, including a `holdout` /
+  `holdout_worlds` pair superseded by the `holdout_selected` path, and dropped
+  a vestigial always-true report filter (`if line != "" or True`).
+- Replaced `zip(bounds[:-1], bounds[1:])` with `itertools.pairwise`, and made
+  the remaining `zip()` calls state `strict=` explicitly.
+
 - Integrated the v2.0.0 suite source tree into the repository; the shipped
   release archives are preserved verbatim under `release/v2.0.0/`.
 - Added `scripts/build_release.sh`: reproducible tar.gz and zip archives with a

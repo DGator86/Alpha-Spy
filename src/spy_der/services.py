@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import math
-import os
 import random
 import signal
 import time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, ClassVar
 
 import numpy as np
 from scipy.stats import norm
@@ -23,7 +23,7 @@ from .publisher import DashboardPublisher
 from .risk import AccountState, choose_decision, parse_account_state
 from .state import build_dashboard_state
 from .strategy import generate_candidates
-from .timeutil import ET, et_now, in_et_window, utc_iso, utc_now
+from .timeutil import ET, et_now, utc_iso, utc_now
 from .tradier import TradierClient, TradierError, normalize_option, normalize_quote
 from .universe import Holding, UniverseProvider
 
@@ -63,8 +63,8 @@ def _quote_is_stale(timestamp: str | None, maximum_age_seconds: int) -> bool:
     try:
         parsed = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        age = (utc_now() - parsed.astimezone(timezone.utc)).total_seconds()
+            parsed = parsed.replace(tzinfo=UTC)
+        age = (utc_now() - parsed.astimezone(UTC)).total_seconds()
         return age > maximum_age_seconds or age < -30
     except ValueError:
         return True
@@ -245,7 +245,7 @@ class MarketService:
         if last_text:
             try:
                 last = datetime.fromisoformat(last_text.replace("Z", "+00:00"))
-                should_collect = (now - last.astimezone(timezone.utc)).total_seconds() >= (
+                should_collect = (now - last.astimezone(UTC)).total_seconds() >= (
                     self.config.market.constituent_iv_refresh_seconds
                 )
             except ValueError:
@@ -600,10 +600,10 @@ class EngineService:
             except Exception as exc:
                 self.journal.heartbeat("engine", "ERROR", None, str(exc))
                 self.journal.alert("critical", "Engine cycle failed", str(exc), "engine")
-                try:
+                # Best effort: the journal already holds the alert, so a
+                # dashboard publish failure must not mask the engine error.
+                with contextlib.suppress(Exception):
                     self.publisher.alert("critical", "Engine cycle failed", str(exc), "engine")
-                except Exception:
-                    pass
             sleep_interruptible(flag, 5.0)
 
     def run_once(self) -> str | None:
@@ -712,14 +712,13 @@ class EngineService:
                     self.journal.set_control("flatten_requested", "true")
                 self.publisher.command_status(command_id, "completed", f"{name} applied")
             except Exception as exc:
-                try:
+                # Best effort: reporting the failure must not itself raise.
+                with contextlib.suppress(Exception):
                     self.publisher.command_status(command_id, "failed", str(exc))
-                except Exception:
-                    pass
 
 
 class ConfirmationService:
-    INTEGRITY_RANK = {
+    INTEGRITY_RANK: ClassVar[dict[str, int]] = {
         "VERIFIED": 0,
         "MINOR_REVISION": 1,
         "MATERIAL_REVISION": 2,
@@ -798,14 +797,14 @@ class ConfirmationService:
                     numeric_timestamp = float(timestamp)
                     if numeric_timestamp > 10_000_000_000:
                         numeric_timestamp /= 1000.0
-                    bar_time = datetime.fromtimestamp(numeric_timestamp, timezone.utc)
-                    delta = abs((bar_time - created.astimezone(timezone.utc)).total_seconds())
+                    bar_time = datetime.fromtimestamp(numeric_timestamp, UTC)
+                    delta = abs((bar_time - created.astimezone(UTC)).total_seconds())
                 except (TypeError, ValueError, OSError):
                     try:
                         bar_time = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
                         if bar_time.tzinfo is None:
                             bar_time = bar_time.replace(tzinfo=ET)
-                        delta = abs((bar_time.astimezone(timezone.utc) - created.astimezone(timezone.utc)).total_seconds())
+                        delta = abs((bar_time.astimezone(UTC) - created.astimezone(UTC)).total_seconds())
                     except ValueError:
                         continue
                 candidates.append((delta, bar))
@@ -946,7 +945,10 @@ class ConfirmationService:
             }
             self.journal.mature_prediction(outcome)
             self._score_candidates(prediction)
-            try:
+            # Best effort: the outcome is already committed to the immutable
+            # tape above, so a dashboard publish failure must not abort
+            # maturation or leave the prediction pending.
+            with contextlib.suppress(Exception):
                 self.publisher.outcome(
                     {
                         "prediction_id": prediction["prediction_id"],
@@ -959,8 +961,6 @@ class ConfirmationService:
                         "payload": outcome["payload"],
                     }
                 )
-            except Exception:
-                pass
             matured += 1
         return matured
 

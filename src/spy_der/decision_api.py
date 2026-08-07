@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import secrets
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, Header, HTTPException

@@ -79,7 +79,7 @@ def model_metrics(frame: pd.DataFrame, sample: str) -> pd.DataFrame:
             "sample": sample,
             "structure": structure,
             "sleeve": CORE_MODELS[structure],
-            "trades": int(len(group)),
+            "trades": len(group),
             "net_pnl": float(pnl.sum()),
             "average_pnl": float(pnl.mean()),
             "median_pnl": float(np.median(pnl)),
@@ -176,7 +176,7 @@ def summarize(selected: pd.DataFrame, worlds: pd.DataFrame) -> tuple[dict, pd.Da
     gl = float(-trade_pnl[trade_pnl < 0].sum()) if len(trade_pnl) else 0.0
     summary = {
         "worlds": len(world_ids),
-        "selected_trades": int(len(selected)),
+        "selected_trades": len(selected),
         "worlds_traded": int(selected["world"].nunique()) if not selected.empty else 0,
         "net_pnl": float(pnl.sum()),
         "average_trade": float(trade_pnl.mean()) if len(trade_pnl) else 0.0,

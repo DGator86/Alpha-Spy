@@ -176,8 +176,8 @@ def portfolio_summary(selected: pd.DataFrame, holdout_worlds: pd.DataFrame) -> t
         }
     )
     summary = {
-        "holdout_worlds": int(len(world_index)),
-        "selected_trades": int(len(selected)),
+        "holdout_worlds": len(world_index),
+        "selected_trades": len(selected),
         "worlds_traded": int(selected["world"].nunique()) if not selected.empty else 0,
         "trade_rate": float(selected["world"].nunique() / max(len(world_index), 1)) if not selected.empty else 0.0,
         "net_pnl": float(world_pnl.sum()),

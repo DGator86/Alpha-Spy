@@ -3,14 +3,14 @@ from __future__ import annotations
 import asyncio
 import math
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .db import Repository
 
 
 def iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def base_state(now: datetime, tick: int = 0) -> dict[str, Any]:
@@ -151,7 +151,7 @@ def base_state(now: datetime, tick: int = 0) -> dict[str, Any]:
 
 
 def seed_history(repo: Repository, now: datetime | None = None) -> None:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     rng = random.Random(19)
     base = 633.70
     for i in range(96):
@@ -185,10 +185,10 @@ def seed_history(repo: Repository, now: datetime | None = None) -> None:
 
 async def demo_loop(repo: Repository) -> None:
     tick = 0
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if not repo.list_predictions(1):
         seed_history(repo, now)
     while True:
-        repo.set_state("live", base_state(datetime.now(timezone.utc), tick), iso(datetime.now(timezone.utc)))
+        repo.set_state("live", base_state(datetime.now(UTC), tick), iso(datetime.now(UTC)))
         tick += 1
         await asyncio.sleep(1.0)

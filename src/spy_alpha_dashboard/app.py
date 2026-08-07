@@ -5,14 +5,22 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings, get_settings
 from .db import Repository
 from .demo import demo_loop
-from .models import AlertRecord, CommandRequest, CommandStatus, OutcomeRecord, PredictionRecord, SnapshotEnvelope, utc_now_iso
+from .models import (
+    AlertRecord,
+    CommandRequest,
+    CommandStatus,
+    OutcomeRecord,
+    PredictionRecord,
+    SnapshotEnvelope,
+    utc_now_iso,
+)
 from .security import verify_admin_token, verify_ingest_token, verify_view_token, websocket_authorized
 from .service import DashboardService
 

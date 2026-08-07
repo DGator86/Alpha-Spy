@@ -154,13 +154,13 @@ class BalancedSeverityModels:
             l2_regularization=3.0,
             random_state=8101,
         )
-        common = dict(
-            max_iter=160,
-            learning_rate=0.05,
-            max_leaf_nodes=12,
-            min_samples_leaf=25,
-            l2_regularization=5.0,
-        )
+        common = {
+            "max_iter": 160,
+            "learning_rate": 0.05,
+            "max_leaf_nodes": 12,
+            "min_samples_leaf": 25,
+            "l2_regularization": 5.0,
+        }
         self.win_size = HistGradientBoostingRegressor(**common, random_state=8102)
         self.loss_size = HistGradientBoostingRegressor(**common, random_state=8103)
         self.loss_q90 = HistGradientBoostingRegressor(
@@ -245,7 +245,7 @@ def metrics(frame: pd.DataFrame) -> dict:
     average_win = float(winners.mean()) if len(winners) else 0.0
     average_loss = float(losers.mean()) if len(losers) else 0.0
     return {
-        "trades": int(len(frame)),
+        "trades": len(frame),
         "win_rate": float(frame["profitable"].mean()),
         "net_pnl": float(frame["pnl"].sum()),
         "average_pnl": float(frame["pnl"].mean()),

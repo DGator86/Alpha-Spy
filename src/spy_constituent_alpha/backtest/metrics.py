@@ -19,7 +19,6 @@ def calibration_error(probabilities: np.ndarray, outcomes: np.ndarray, bins: int
     p = np.asarray(probabilities, dtype=float)
     y = np.asarray(outcomes, dtype=float)
     edges = np.linspace(0.0, 1.0, bins + 1)
-    total = len(p)
     error = 0.0
     for i in range(bins):
         mask = (p >= edges[i]) & (p < edges[i + 1] if i < bins - 1 else p <= edges[i + 1])

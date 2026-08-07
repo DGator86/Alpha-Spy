@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -46,7 +46,7 @@ def scan_credit_verticals(
     now: datetime | None = None,
     max_width: float = 20.0,
 ) -> list[EdgeEstimate]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     rows = _eligible(chain, settings, now)
     results: list[EdgeEstimate] = []
     for right in ("C", "P"):
@@ -113,7 +113,7 @@ def scan_butterflies(
     now: datetime | None = None,
     max_wing_width: float = 10.0,
 ) -> list[EdgeEstimate]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     rows = _eligible(chain, settings, now)
     results: list[EdgeEstimate] = []
     for right in ("C", "P"):
@@ -183,7 +183,7 @@ def scan_iron_condors(
     max_wing_width: float = 8.0,
     min_body_width: float = 2.0,
 ) -> list[EdgeEstimate]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     rows = _eligible(chain, settings, now)
     puts = sorted([r for r in rows if str(r.right).upper().startswith("P")], key=lambda r: r.strike)
     calls = sorted([r for r in rows if str(r.right).upper().startswith("C")], key=lambda r: r.strike)

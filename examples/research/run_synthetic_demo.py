@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,6 @@ from spy_constituent_alpha.models.risk_neutral import (
     SyntheticRiskNeutralModel,
     build_smile_slice,
 )
-from spy_constituent_alpha.pricing.black_scholes import black_scholes_price
 from spy_constituent_alpha.signals.mispricing import ScanSettings, scan_long_options, scan_vertical_spreads
 from spy_constituent_alpha.signals.ranking import edges_to_frame
 from spy_constituent_alpha.signals.structures import (
@@ -108,14 +107,14 @@ def make_spy_chain(
 
 
 def main():
-    tickers, weights, sectors, returns = make_constituents()
+    tickers, weights, _sectors, returns = make_constituents()
     covariance_model = DynamicCovarianceModel(halflife=390, shrinkage=0.25)
     covariance = covariance_model.fit(returns.tail(1200))
     downside_covariance = covariance_model.fit(
         returns.tail(1200), downside=True, market_return=returns.mean(axis=1).tail(1200)
     )
 
-    now = datetime(2026, 8, 4, 14, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 4, 14, 30, tzinfo=UTC)
     expiration = now + timedelta(days=3)
     rate = 0.045
     dividend_yield = 0.012

@@ -106,12 +106,10 @@ jobs:
           retention-days: 14
 
   lint:
-    name: Ruff (advisory)
+    name: Ruff
     runs-on: ubuntu-24.04
-    # The v2.0.0 source carries pre-existing style findings. This job reports
-    # them to the run summary without gating; the blocking checks live in
-    # `static`. Findings are deliberately not emitted as inline annotations —
-    # a few hundred of them would bury real review comments in the diff.
+    # Gating. The rule set is pinned in pyproject.toml, so this stays stable
+    # across ruff releases instead of growing new findings on every upgrade.
     steps:
       - uses: actions/checkout@v4
 
@@ -122,20 +120,5 @@ jobs:
       - name: Install ruff
         run: python -m pip install "ruff>=0.8,<1"
 
-      - name: Report style findings
-        run: |
-          set -Eeuo pipefail
-          # ruff rejects --statistics combined with a non-default output
-          # format, so the summary is built from the default rendering.
-          ruff check --statistics src tests examples > findings.txt 2>&1 || true
-          total="$(ruff check --quiet --output-format=concise src tests examples 2>/dev/null | wc -l || true)"
-          {
-            echo "## Ruff findings (advisory — does not gate this pipeline)"
-            echo
-            echo "**$total** findings across \`src\`, \`tests\` and \`examples\`."
-            echo
-            echo '```'
-            cat findings.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          cat findings.txt
+      - name: Lint
+        run: ruff check --output-format=github src tests examples

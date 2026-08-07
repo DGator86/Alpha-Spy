@@ -12,7 +12,7 @@ from scipy.stats import norm
 
 from .config import SuiteConfig
 from .db import Journal
-from .timeutil import ET, utc_now, utc_iso
+from .timeutil import ET, utc_iso, utc_now
 
 
 def canonical_hash(value: Any) -> str:
