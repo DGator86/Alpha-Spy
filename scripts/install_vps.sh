@@ -10,7 +10,10 @@ mkdir -p "$BACKUP_DIR"
 
 echo "[1/9] Installing Ubuntu dependencies"
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip sqlite3 zstd rclone curl ca-certificates
+# python3-yaml backs the operator scripts that edit /etc/spy-der/config.yaml.
+# They prefer /opt/spy-der/venv/bin/python, which always has PyYAML, but keep
+# the system interpreter usable as a fallback on a minimal image.
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv python3-pip python3-yaml sqlite3 zstd rclone curl ca-certificates
 
 echo "[2/9] Stopping existing SPY services without deleting data"
 systemctl stop spy-der.target 2>/dev/null || true

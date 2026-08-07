@@ -115,19 +115,40 @@ class StrategyConfig(BaseModel):
 
 
 class RiskConfig(BaseModel):
-    maximum_contracts: int = 1
-    maximum_trades_per_day: int = 1
-    maximum_trade_risk_dollars: float = 100.0
-    account_risk_fraction: float = 0.0025
-    daily_loss_limit_dollars: float = 200.0
-    minimum_trust_to_trade: float = 0.75
-    yellow_risk_multiplier: float = 0.50
-    orange_risk_multiplier: float = 0.25
+    # Bounds are enforced rather than documented: these are the controls that
+    # cap loss, and a typo that loads silently is the failure mode that matters.
+    maximum_contracts: int = Field(default=1, ge=1, le=1)
+    maximum_trades_per_day: int = Field(default=1, ge=0)
+    maximum_trade_risk_dollars: float = Field(default=100.0, ge=0.0)
+    account_risk_fraction: float = Field(default=0.0025, ge=0.0, le=1.0)
+    daily_loss_limit_dollars: float = Field(default=200.0, ge=0.0)
+    minimum_trust_to_trade: float = Field(default=0.75, ge=0.0, le=1.0)
+    yellow_risk_multiplier: float = Field(default=0.50, ge=0.0, le=1.0)
+    orange_risk_multiplier: float = Field(default=0.25, ge=0.0, le=1.0)
     forced_flat_time_et: str = "15:55"
     entry_start_time_et: str = "09:40"
     entry_stop_time_et: str = "15:15"
     block_on_incomplete_universe: bool = True
     block_on_stale_data: bool = True
+
+    @field_validator("forced_flat_time_et", "entry_start_time_et", "entry_stop_time_et")
+    @classmethod
+    def _valid_et_time(cls, value: str) -> str:
+        """Reject a time the risk controls cannot act on.
+
+        Left unvalidated, "15:5x" or "24:00" only surfaces mid-session, when
+        the control that reads it is the one being relied upon.
+        """
+        text = str(value).strip()
+        try:
+            hour_text, minute_text = text.split(":", 1)
+            hour, minute = int(hour_text), int(minute_text)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(f"expected a HH:MM Eastern time, got {value!r}") from exc
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError(f"expected a HH:MM Eastern time, got {value!r}")
+        # Normalise so any downstream string handling stays zero-padded.
+        return f"{hour:02d}:{minute:02d}"
 
 
 class TradingConfig(BaseModel):

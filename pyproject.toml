@@ -25,7 +25,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1"]
+# tabulate backs DataFrame.to_markdown(), which every research driver under
+# examples/ calls when it writes its REPORT.md. It is not needed by the
+# installed runtime under src/, so it stays out of the core dependency list
+# and off the trading VPS.
+research = ["tabulate>=0.9,<1"]
+dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1", "tabulate>=0.9,<1"]
 
 [project.scripts]
 spy-der = "spy_der.cli:main"

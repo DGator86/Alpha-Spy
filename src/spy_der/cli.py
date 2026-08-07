@@ -105,15 +105,41 @@ def doctor(config: SuiteConfig, journal: Journal) -> int:
         "admin_token_configured": bool(config.dashboard.admin_token.get_secret_value()),
         "ingest_token_configured": bool(config.dashboard.ingest_token.get_secret_value()),
     }
+    universe_ok = False
     try:
         holdings = UniverseProvider(config).get()
+        covered_weight = sum(x.weight for x in holdings)
         checks["universe_count"] = len(holdings)
-        checks["universe_weight"] = sum(x.weight for x in holdings)
+        checks["universe_weight"] = covered_weight
+        universe_ok = (
+            len(holdings) >= config.universe.minimum_symbols
+            and covered_weight >= config.universe.minimum_covered_weight
+        )
     except Exception as exc:
         checks["universe_error"] = str(exc)
-    checks["doctor"] = "ok" if checks["database_quick_check"] == "ok" else "degraded"
+    checks["universe_meets_minimum"] = universe_ok
+
+    # Report the conditions that actually gate trading. Reporting "ok" while
+    # the universe sits below the configured minimum -- which blocks every
+    # entry when block_on_incomplete_universe is set -- tells an operator the
+    # opposite of what the risk controller will do.
+    warnings: list[str] = []
+    if not universe_ok:
+        warnings.append(
+            "universe below the configured minimum "
+            f"({checks.get('universe_count', 0)}/{config.universe.minimum_symbols} symbols, "
+            f"{checks.get('universe_weight', 0.0):.3f}/{config.universe.minimum_covered_weight} weight)"
+        )
+        if config.risk.block_on_incomplete_universe:
+            warnings.append("entries are blocked while universe coverage is incomplete")
+    checks["warnings"] = warnings
+
+    # Only a broken database is a hard failure: a thin universe is recoverable
+    # and fails closed on its own, so it must not abort an installation.
+    failed = checks["database_quick_check"] != "ok"
+    checks["doctor"] = "failed" if failed else ("degraded" if warnings else "ok")
     print(json.dumps(checks, indent=2, default=str))
-    return 0 if checks["doctor"] == "ok" else 1
+    return 1 if failed else 0
 
 
 def init_config(path: Path, force: bool) -> None:

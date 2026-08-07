@@ -18,30 +18,32 @@ class AccountState:
     daily_pnl: float
 
 
+def _first_present(balances: dict[str, Any], *keys: str, default: float) -> float:
+    """Return the first key that is actually present, treating 0.0 as a value.
+
+    An `or` chain cannot be used here: a genuine zero balance or a flat
+    open P&L is falsy, so it would be discarded in favour of the next key or
+    the default. For an account with no equity that silently invents one.
+    """
+    for key in keys:
+        if balances.get(key) is not None:
+            return _num(balances[key])
+    return default
+
+
 def parse_account_state(payload: dict[str, Any] | None) -> AccountState:
     payload = payload or {}
     balances = payload.get("balances", payload)
     if isinstance(balances, dict) and "balances" in balances:
         balances = balances["balances"] or {}
-    equity = _num(
-        balances.get("total_equity")
-        or balances.get("equity")
-        or balances.get("total_cash")
-        or 25_000.0
+    if not isinstance(balances, dict):
+        balances = {}
+    equity = _first_present(balances, "total_equity", "equity", "total_cash", default=25_000.0)
+    cash = _first_present(balances, "total_cash", "cash", default=equity)
+    buying_power = _first_present(
+        balances, "stock_buying_power", "option_buying_power", "buying_power", default=cash
     )
-    cash = _num(balances.get("total_cash") or balances.get("cash") or equity)
-    buying_power = _num(
-        balances.get("stock_buying_power")
-        or balances.get("option_buying_power")
-        or balances.get("buying_power")
-        or cash
-    )
-    daily_pnl = _num(
-        balances.get("open_pl")
-        or balances.get("unrealized_pl")
-        or balances.get("day_trade_buying_power_used") * 0.0
-        or 0.0
-    )
+    daily_pnl = _first_present(balances, "open_pl", "unrealized_pl", default=0.0)
     return AccountState(equity=equity, cash=cash, buying_power=buying_power, daily_pnl=daily_pnl)
 
 

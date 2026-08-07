@@ -23,7 +23,7 @@ from .publisher import DashboardPublisher
 from .risk import AccountState, choose_decision, parse_account_state
 from .state import build_dashboard_state
 from .strategy import generate_candidates
-from .timeutil import ET, et_now, utc_iso, utc_now
+from .timeutil import ET, at_or_after_et, et_now, utc_iso, utc_now
 from .tradier import TradierClient, TradierError, normalize_option, normalize_quote
 from .universe import Holding, UniverseProvider
 
@@ -1020,7 +1020,7 @@ class SettlementService:
         elif self.journal.get_control("flatten_requested", "false").lower() == "true":
             close_reason = "operator_flatten"
             self.journal.set_control("flatten_requested", "false")
-        elif et_now().strftime("%H:%M") >= self.config.risk.forced_flat_time_et:
+        elif at_or_after_et(utc_now(), self.config.risk.forced_flat_time_et):
             close_reason = "forced_flat_time"
         position.update(
             {

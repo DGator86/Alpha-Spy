@@ -30,6 +30,11 @@ make venv
 source .venv/bin/activate
 ```
 
+`make venv` installs the `dev` extra, which includes `tabulate`. The research
+drivers under `examples/` need it for the markdown reports they write; to
+install it without the rest of the dev tooling, use `pip install -e '.[research]'`.
+The installed runtime under `src/` does not need it, so it stays off the VPS.
+
 ## Local build
 
 | Command | What it does |

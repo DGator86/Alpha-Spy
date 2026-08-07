@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo "Run as root"; exit 1; }
+
+# PyYAML ships as a dependency of the installed wheel, not of the system
+# interpreter, and install_vps.sh never adds python3-yaml. Prefer the suite's
+# virtualenv so this keeps working on a minimal Ubuntu image.
+PYTHON="${SPY_DER_PYTHON:-/opt/spy-der/venv/bin/python}"
+[[ -x "$PYTHON" ]] || PYTHON=python3
 rm -f /etc/spy-der/PRODUCTION_UNLOCKED
-python3 - <<'PY'
+"$PYTHON" - <<'PY'
 from pathlib import Path
 import yaml
 p=Path('/etc/spy-der/config.yaml')

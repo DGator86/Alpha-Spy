@@ -30,3 +30,15 @@ def in_et_window(now: datetime, start: str, end: str) -> bool:
     end_t = parse_hhmm(end).replace(tzinfo=None)
     current = local.time().replace(tzinfo=None)
     return start_t <= current <= end_t
+
+
+def at_or_after_et(now: datetime, moment: str) -> bool:
+    """True once the Eastern wall clock has reached `moment` ("HH:MM").
+
+    Compares parsed times rather than "HH:MM" strings. A lexicographic
+    comparison silently fails for any value that is not zero-padded --
+    "15:00" >= "9:55" is False -- which would disable a time-based control
+    entirely. parse_hhmm accepts "9:55", so the two must agree.
+    """
+    current = now.astimezone(ET).time().replace(tzinfo=None)
+    return current >= parse_hhmm(moment).replace(tzinfo=None)

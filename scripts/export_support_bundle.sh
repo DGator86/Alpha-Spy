@@ -2,13 +2,19 @@
 set -Eeuo pipefail
 umask 077
 [[ $EUID -eq 0 ]] || { echo 'Run as root'; exit 1; }
+
+# PyYAML ships as a dependency of the installed wheel, not of the system
+# interpreter, and install_vps.sh never adds python3-yaml. Prefer the suite's
+# virtualenv so this keeps working on a minimal Ubuntu image.
+PYTHON="${SPY_DER_PYTHON:-/opt/spy-der/venv/bin/python}"
+[[ -x "$PYTHON" ]] || PYTHON=python3
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 WORK="$(mktemp -d /var/tmp/spy-der-support.XXXXXX)"
 OUT="/root/spy-der-support-$STAMP.tar.gz"
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK"
 
-python3 - <<'PY' >"$WORK/config-redacted.yaml"
+"$PYTHON" - <<'PY' >"$WORK/config-redacted.yaml"
 from pathlib import Path
 import yaml
 p=Path('/etc/spy-der/config.yaml')

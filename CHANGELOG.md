@@ -2,6 +2,57 @@
 
 ## Unreleased
 
+### Correctness fixes
+
+- **Account state could not be parsed for a flat account.** `parse_account_state`
+  fell through an `or` chain to `get("day_trade_buying_power_used") * 0.0`,
+  which raised `TypeError` whenever that key was absent — including the normal
+  case of `open_pl == 0.0`. With Tradier configured, every engine cycle then
+  logged "Account poll failed" and substituted a fabricated $25,000 equity, so
+  risk was sized off a phantom balance.
+- **A real zero balance was replaced by the $25,000 default.** The same `or`
+  chains treated a legitimate `0.0` equity, cash or P&L as a missing key. A
+  blown account was sized as if it held $25,000; it now yields zero allowed
+  risk and blocks entries.
+- **The forced flat could be silently disabled.** It compared
+  `strftime("%H:%M")` against the raw configured string, and `"15:00" >= "9:55"`
+  is false lexicographically, so any non-zero-padded time disabled the control
+  entirely — a position would never be flattened. Times are now parsed, and
+  `RiskConfig` normalises and validates them.
+- **Risk limits were unvalidated.** `maximum_contracts`, loss limits, trust and
+  multipliers now carry explicit bounds, so a typo fails at load instead of
+  loading silently.
+- **SQLite connections were never closed on read paths.** `with connect() as
+  con` commits but does not close, leaving handles to the cyclic collector —
+  124 file descriptors leaked per 6,000 reads. Under WAL those lingering
+  readers hold locks that prevent checkpointing, so the `-wal` file grows all
+  session. Both the journal and the dashboard repository now close.
+- **`tabulate` was undeclared.** Every research driver calls
+  `DataFrame.to_markdown()`, so all four ran their full simulation and then
+  crashed writing the report. Added as a `research` extra (and to `dev`).
+- **`to_numpy()` returned a read-only array under pandas 3.0.** The
+  correlation-risk-premium write in `SyntheticRiskNeutralModel.simulate`
+  raised; the suite permits `pandas<4`.
+- **Operator scripts assumed system PyYAML.** `production_lock.sh`,
+  `production_unlock.sh` and `export_support_bundle.sh` invoked bare `python3`
+  to edit `/etc/spy-der/config.yaml`, but PyYAML ships with the wheel and the
+  installer never added `python3-yaml`. They now prefer the suite interpreter,
+  and the installer provides a fallback.
+- **`doctor` reported `ok` while entries were blocked.** Its verdict considered
+  only database integrity, so it answered `ok` with a 20-symbol universe
+  against a configured minimum of 450 — the state in which the coverage gate
+  refuses every entry. It now reports `degraded` with the reason, while still
+  exiting non-zero only on a hard database failure so installs are unaffected.
+
+### Tests
+
+- Coverage grew from 27 to 178. New suites cover the documented risk controls
+  and production lock, Eastern-time handling across both DST offsets,
+  connection lifetime and concurrent writers, the research drivers end to end,
+  and static guards over the installer, operator scripts and systemd units.
+- `run_synthetic_demo` is now a golden test: it must reproduce the committed
+  `examples/synthetic_edge_output.csv` byte for byte.
+
 - Cleared all ruff findings across `src/`, `tests/` and `examples/`, and
   promoted the ruff CI job from advisory to gating.
 - Pinned the ruff rule set explicitly in `pyproject.toml`. Previously only

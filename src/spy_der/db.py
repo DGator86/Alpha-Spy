@@ -364,6 +364,24 @@ class Journal:
         return con
 
     @contextmanager
+    def session(self) -> Iterator[sqlite3.Connection]:
+        """A connection that is actually closed when the block exits.
+
+        sqlite3's own context manager commits or rolls back but never closes,
+        so `with self.session() as con:` left every handle to the cyclic
+        collector. That matters under WAL: a lingering reader holds a read
+        lock that prevents checkpointing, so the -wal file grows without bound
+        in a service that polls all session. It also leaks file descriptors
+        until a collection happens to run.
+        """
+        con = self.connect()
+        try:
+            with con:
+                yield con
+        finally:
+            con.close()
+
+    @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
             con = self.connect()
@@ -378,7 +396,7 @@ class Journal:
                 con.close()
 
     def initialize(self) -> None:
-        with self.connect() as con:
+        with self.session() as con:
             con.executescript(SCHEMA)
             columns = {row[1] for row in con.execute("PRAGMA table_info(option_chain_snapshots)")}
             if "purpose" not in columns:
@@ -433,7 +451,7 @@ class Journal:
             )
 
     def get_control(self, key: str, default: str = "") -> str:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute("SELECT value FROM control_state WHERE key=?", (key,)).fetchone()
         return str(row[0]) if row else default
 
@@ -524,7 +542,7 @@ class Journal:
     def latest_option_chain(
         self, underlying: str = "SPY", purpose: str = "strategy"
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 """
                 SELECT * FROM option_chain_snapshots
@@ -549,7 +567,7 @@ class Journal:
         return chain, result
 
     def snapshot_quotes(self, snapshot_id: str) -> list[dict[str, Any]]:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute(
                 "SELECT * FROM snapshot_quotes WHERE snapshot_id=? ORDER BY weight DESC",
                 (snapshot_id,),
@@ -605,7 +623,7 @@ class Journal:
               ON latest.symbol=o.symbol AND latest.captured_at=o.captured_at
             ORDER BY o.weight DESC
         """
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute(sql, [*symbols, not_before_iso]).fetchall()
         output = []
         for row in rows:
@@ -649,7 +667,7 @@ class Journal:
             )
 
     def surface_metrics(self, snapshot_id: str) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 "SELECT * FROM surface_metrics WHERE snapshot_id=?", (snapshot_id,)
             ).fetchone()
@@ -855,7 +873,7 @@ class Journal:
     def nearest_option_chain(
         self, target_iso: str, purpose: str = "strategy", tolerance_seconds: int = 150
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 """
                 SELECT *, ABS((julianday(captured_at)-julianday(?))*86400.0) AS delta_seconds
@@ -885,7 +903,7 @@ class Journal:
         self, target_iso: str, purpose: str = "strategy", tolerance_seconds: int = 180
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
         """Return the first executable option tape on or after a target time."""
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 """
                 SELECT *, (julianday(captured_at)-julianday(?))*86400.0 AS delta_seconds
@@ -912,7 +930,7 @@ class Journal:
         return chain, output
 
     def managed_daily_pnl(self, session_date: str) -> float:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute(
                 "SELECT closed_at,realized_pnl,status,unrealized_pnl FROM positions"
             ).fetchall()
@@ -935,7 +953,7 @@ class Journal:
         return total
 
     def latest_snapshot(self) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 "SELECT * FROM market_snapshots ORDER BY captured_at DESC LIMIT 1"
             ).fetchone()
@@ -946,7 +964,7 @@ class Journal:
         return item
 
     def latest_features(self) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute("SELECT * FROM features ORDER BY created_at DESC LIMIT 1").fetchone()
         if not row:
             return None
@@ -955,7 +973,7 @@ class Journal:
         return item
 
     def latest_prediction(self) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute("SELECT * FROM predictions ORDER BY created_at DESC LIMIT 1").fetchone()
         if not row:
             return None
@@ -964,7 +982,7 @@ class Journal:
         return item
 
     def latest_candidates(self, prediction_id: str, limit: int = 50) -> list[dict[str, Any]]:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute(
                 "SELECT * FROM candidates WHERE prediction_id=? ORDER BY score DESC LIMIT ?",
                 (prediction_id, limit),
@@ -978,7 +996,7 @@ class Journal:
         return result
 
     def latest_decision(self) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute("SELECT * FROM decisions ORDER BY created_at DESC LIMIT 1").fetchone()
         if not row:
             return None
@@ -987,7 +1005,7 @@ class Journal:
         return item
 
     def open_position(self) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 "SELECT * FROM positions WHERE status='OPEN' ORDER BY opened_at DESC LIMIT 1"
             ).fetchone()
@@ -999,7 +1017,7 @@ class Journal:
         return item
 
     def quote_history(self, symbol: str, limit: int = 120) -> list[dict[str, Any]]:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute(
                 """
                 SELECT s.captured_at,q.price,q.bid,q.ask,q.change_pct,q.weight
@@ -1013,7 +1031,7 @@ class Journal:
         return [dict(row) for row in reversed(rows)]
 
     def pending_predictions(self, now_iso: str, grace_seconds: int = 0) -> list[dict[str, Any]]:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute(
                 """
                 SELECT p.* FROM predictions p
@@ -1031,7 +1049,7 @@ class Journal:
         return output
 
     def nearest_snapshot(self, target_iso: str, tolerance_seconds: int = 120) -> dict[str, Any] | None:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 """
                 SELECT *, ABS((julianday(captured_at)-julianday(?))*86400.0) AS delta_seconds
@@ -1055,7 +1073,7 @@ class Journal:
         This prevents the confirmation tape from accidentally using a pre-target
         snapshot merely because it is closer in absolute time.
         """
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute(
                 """
                 SELECT *, (julianday(captured_at)-julianday(?))*86400.0 AS delta_seconds
@@ -1073,7 +1091,7 @@ class Journal:
         return item
 
     def services(self) -> list[dict[str, Any]]:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute("SELECT * FROM service_heartbeats ORDER BY service").fetchall()
         result = []
         for row in rows:
@@ -1083,7 +1101,7 @@ class Journal:
         return result
 
     def recent_alerts(self, limit: int = 100) -> list[dict[str, Any]]:
-        with self.connect() as con:
+        with self.session() as con:
             rows = con.execute("SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?", (limit,)).fetchall()
         result = []
         for row in rows:
@@ -1096,7 +1114,7 @@ class Journal:
     def confirmation_metrics(
         self, limit: int = 500, formal_only: bool = True
     ) -> dict[str, Any]:
-        with self.connect() as con:
+        with self.session() as con:
             if formal_only:
                 rows = con.execute(
                     """
@@ -1132,6 +1150,6 @@ class Journal:
         }
 
     def integrity_check(self) -> str:
-        with self.connect() as con:
+        with self.session() as con:
             row = con.execute("PRAGMA quick_check").fetchone()
         return str(row[0]) if row else "unknown"

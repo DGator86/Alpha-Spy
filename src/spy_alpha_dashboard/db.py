@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -62,11 +64,26 @@ class Repository:
         self._lock = threading.RLock()
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _open(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA busy_timeout=30000")
         return con
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit/rollback like sqlite3's own context manager, then close.
+
+        sqlite3 never closes on exit, which under WAL leaves readers holding
+        locks that block checkpointing, so the -wal file grows without bound
+        in a process that serves requests all session.
+        """
+        con = self._open()
+        try:
+            with con:
+                yield con
+        finally:
+            con.close()
 
     def _initialize(self) -> None:
         with self._connect() as con:
