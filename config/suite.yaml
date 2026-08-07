@@ -1,0 +1,135 @@
+paths:
+  state_root: /var/lib/spy-der
+  database: /var/lib/spy-der/journal/suite-v2.db
+  dashboard_database: /var/lib/spy-der/dashboard/command-center-v2.sqlite
+  universe_cache: /var/lib/spy-der/reference/universe.csv
+  model_dir: /var/lib/spy-der/models
+  report_dir: /var/lib/spy-der/reports
+  log_dir: /var/log/spy-der
+  production_sentinel: /etc/spy-der/PRODUCTION_UNLOCKED
+
+tradier:
+  environment: sandbox
+  access_token: ""
+  account_id: ""
+  timeout_seconds: 20
+  market_data_chunk_size: 150
+  preview_orders: true
+  stream_enabled: false
+
+universe:
+  source: ishares_ivv
+  source_url: https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
+  local_csv: /etc/spy-der/universe.csv
+  refresh_hour_et: 7
+  maximum_age_hours: 36
+  minimum_symbols: 450
+  top_n_quotes: 503
+  top_n_option_iv: 40
+  minimum_covered_weight: 0.90
+
+market:
+  poll_interval_seconds: 60
+  quote_stale_seconds: 120
+  option_quote_stale_seconds: 180
+  collect_only_market_hours: false
+  demo_when_unconfigured: true
+  include_symbols: [SPY, QQQ, IWM]
+  option_expiration_mode: zero_dte
+  option_chain_greeks: true
+  max_option_chain_rows: 800
+  constituent_option_batch_size: 6
+  constituent_iv_refresh_seconds: 60
+  constituent_iv_max_age_minutes: 20
+  iv_reference_min_dte: 3
+  iv_reference_max_dte: 14
+
+prediction:
+  horizon_minutes: 15
+  minimum_history_rows: 30
+  return_lookback_rows: 60
+  distribution_z: 1.28
+  min_sigma_return: 0.00045
+  max_sigma_return: 0.012
+  pressure_coefficient: 0.35
+  residual_coefficient: 0.20
+  breadth_coefficient: 0.08
+  mean_reversion_coefficient: 0.05
+  model_version: constituent-linear-v2.0.0
+
+strategy:
+  enabled_families:
+    - LONG_CALL
+    - LONG_PUT
+    - CALL_DEBIT_SPREAD
+    - PUT_DEBIT_SPREAD
+    - BULL_PUT_CREDIT_SPREAD
+    - BEAR_CALL_CREDIT_SPREAD
+    - LONG_STRANGLE
+    - LONG_STRADDLE
+    - IRON_CONDOR
+    - CALL_BUTTERFLY
+    - PUT_BUTTERFLY
+  min_open_interest: 25
+  min_volume: 1
+  max_relative_spread: 0.35
+  min_credit: 0.10
+  max_debit: 3.50
+  max_width: 10.0
+  min_edge_dollars: 0.03
+  min_probability: 0.60
+  max_candidates_per_cycle: 40
+
+risk:
+  maximum_contracts: 1
+  maximum_trades_per_day: 1
+  maximum_trade_risk_dollars: 100
+  account_risk_fraction: 0.0025
+  daily_loss_limit_dollars: 200
+  minimum_trust_to_trade: 0.75
+  yellow_risk_multiplier: 0.50
+  orange_risk_multiplier: 0.25
+  forced_flat_time_et: "15:55"
+  entry_start_time_et: "09:40"
+  entry_stop_time_et: "15:15"
+  block_on_incomplete_universe: true
+  block_on_stale_data: true
+
+trading:
+  enabled: false
+  paper_mode: true
+  submit_orders: false
+  require_preview: true
+  limit_price_steps: 4
+  limit_price_wait_seconds: 8
+  cancel_confirm_seconds: 15
+  tag_prefix: SPYDER
+
+audit:
+  enabled: true
+  confirmation_interval_seconds: 30
+  maturity_grace_seconds: 90
+  maximum_snapshot_revision_bps: 1.0
+  formal_anchor_minutes: 15
+  minimum_promotion_sessions: 20
+  minimum_promotion_forecasts: 500
+  health_green: 0.75
+  health_yellow: 0.50
+  health_orange: 0.30
+
+dashboard:
+  host: 127.0.0.1
+  port: 8788
+  mode: live
+  require_view_token: true
+  view_token: ""
+  admin_token: ""
+  ingest_token: ""
+  websocket_interval_seconds: 1.0
+
+backup:
+  enabled: true
+  remote: "gdrive:SPY Trading Backups/srv1575978"
+  time_et: "17:00"
+  keep_daily_database_snapshots: true
+  copy_raw_data: true

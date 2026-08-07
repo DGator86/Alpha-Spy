@@ -1,0 +1,67 @@
+{
+  "name": "empirical_occurrence_v1",
+  "description": "Historically anchored 0DTE SPY stress-universe calibration. This is a constrained simulation, not a substitute for licensed historical constituent and option-chain replay.",
+  "sources": [
+    {
+      "source": "Cboe/FRED VIX daily history",
+      "anchor": "1990-present daily VIX series; regime frequencies approximated as 35% below 15, 30% 15-20, 25% 20-30, 8% 30-50, 2% above 50"
+    },
+    {
+      "source": "S&P Dow Jones Indices",
+      "anchor": "Float-adjusted market-cap weighting; 503 constituents as of 2026-06-30; largest constituent near 7.2% of index market cap and top-heavy technology concentration"
+    },
+    {
+      "source": "Intraday S&P 500 and SPY microstructure literature",
+      "anchor": "U-shaped volatility/informed-trading profile, higher open and close activity, macro announcement clusters, heavy-tailed returns, volatility persistence and higher downside correlation"
+    },
+    {
+      "source": "Cboe 0DTE market statistics",
+      "anchor": "Same-day options are a dominant share of SPX volume and overwhelmingly expressed with limited-risk structures"
+    }
+  ],
+  "vix_regimes": [
+    {"name": "low_vol", "probability": 0.35, "vix_range": [10.0, 15.0], "annual_realized_vol_range": [0.075, 0.145], "correlation_range": [0.16, 0.32]},
+    {"name": "normal_vol", "probability": 0.30, "vix_range": [15.0, 20.0], "annual_realized_vol_range": [0.11, 0.20], "correlation_range": [0.22, 0.42]},
+    {"name": "elevated_vol", "probability": 0.25, "vix_range": [20.0, 30.0], "annual_realized_vol_range": [0.17, 0.32], "correlation_range": [0.34, 0.58]},
+    {"name": "crisis_vol", "probability": 0.08, "vix_range": [30.0, 50.0], "annual_realized_vol_range": [0.28, 0.55], "correlation_range": [0.52, 0.78]},
+    {"name": "extreme_vol", "probability": 0.02, "vix_range": [50.0, 85.0], "annual_realized_vol_range": [0.50, 0.95], "correlation_range": [0.70, 0.92]}
+  ],
+  "event_occurrence": {
+    "none": 0.58,
+    "broad_up": 0.05,
+    "broad_down": 0.05,
+    "sector_up": 0.02,
+    "sector_down": 0.02,
+    "mega_up": 0.07,
+    "mega_down": 0.07,
+    "scheduled_macro_up": 0.07,
+    "scheduled_macro_down": 0.07
+  },
+  "controlled_surface_dislocation": {
+    "none": 0.82,
+    "underpriced_variance": 0.06,
+    "overpriced_variance": 0.06,
+    "underpriced_downside_skew": 0.04,
+    "underpriced_upside_skew": 0.02,
+    "strength_range": [0.02, 0.10],
+    "duration_minutes": [10, 60]
+  },
+  "constituent_proxy": {
+    "representative_names": 50,
+    "target_largest_weight": 0.072,
+    "target_top_10_weight": 0.38,
+    "sectors": 11,
+    "within_sector_dependence_multiple": 2.8
+  },
+  "hard_constraints": {
+    "intraday_only": true,
+    "forced_exit_minute": 385,
+    "no_stock_ownership": true,
+    "defined_risk_only": true,
+    "max_aggregate_loss_dollars": 900,
+    "minimum_final_evaluation_trades": 100,
+    "target_win_rate": 0.75,
+    "minimum_profit_factor": 1.20,
+    "minimum_positive_batches": 4
+  }
+}

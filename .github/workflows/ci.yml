@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  # Branch pushes are covered by pull_request. Listing both would run every
+  # job twice on any branch that has an open pull request.
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  static:
+    name: Static validation
+    # Matches the deployment target recorded in BUILD_REPORT.md.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Python compilation
+        run: python -m compileall -q src tests examples
+
+      - name: Shell syntax
+        run: bash -n install.sh scripts/*.sh scripts/spy-der-drive-backup
+
+      - name: Dashboard JavaScript syntax
+        run: node --check src/spy_alpha_dashboard/static/app.js
+
+      - name: systemd units and timers
+        run: bash scripts/verify_units.sh
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the documented floor; 3.12 is what Ubuntu 24.04 ships.
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the suite with dev extras
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -e ".[dev]"
+
+      - name: Run the test suite
+        run: PYTHONPATH=src:. pytest -q
+
+  package:
+    name: Build, verify and smoke test
+    runs-on: ubuntu-24.04
+    needs: [static, test]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build_release.sh derives SOURCE_DATE_EPOCH from the HEAD commit
+          # so archives are reproducible; that needs real commit metadata.
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip wheel build
+
+      - name: Build the release archives
+        run: make release
+
+      - name: Verify the archives against their manifests
+        run: make verify-release
+
+      - name: Smoke test the built wheel
+        run: make smoke
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: spy-constituent-alpha-suite
+          path: |
+            dist/release/*.tar.gz
+            dist/release/*.zip
+            dist/release/*.sha256
+            dist/release/RELEASE_MANIFEST.sha256
+          retention-days: 14
+
+  lint:
+    name: Ruff (advisory)
+    runs-on: ubuntu-24.04
+    # The v2.0.0 source carries pre-existing style findings. This job reports
+    # them to the run summary without gating; the blocking checks live in
+    # `static`. Findings are deliberately not emitted as inline annotations —
+    # a few hundred of them would bury real review comments in the diff.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: python -m pip install "ruff>=0.8,<1"
+
+      - name: Report style findings
+        run: |
+          set -Eeuo pipefail
+          # ruff rejects --statistics combined with a non-default output
+          # format, so the summary is built from the default rendering.
+          ruff check --statistics src tests examples > findings.txt 2>&1 || true
+          total="$(ruff check --quiet --output-format=concise src tests examples 2>/dev/null | wc -l || true)"
+          {
+            echo "## Ruff findings (advisory — does not gate this pipeline)"
+            echo
+            echo "**$total** findings across \`src\`, \`tests\` and \`examples\`."
+            echo
+            echo '```'
+            cat findings.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat findings.txt

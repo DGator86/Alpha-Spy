@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (must already exist, e.g. v2.0.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip wheel build
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -Eeuo pipefail
+          version="$(python -c "import re,pathlib;print(re.search(r'^version\s*=\s*\"([^\"]+)\"',pathlib.Path('pyproject.toml').read_text(),re.M).group(1))")"
+          tag="${{ inputs.tag || github.ref_name }}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "name=spy-constituent-alpha-suite-v$version" >> "$GITHUB_OUTPUT"
+          # A tag that disagrees with pyproject.toml would publish artifacts
+          # whose filenames do not match the release they are attached to.
+          if [[ "$tag" != "v$version" ]]; then
+            echo "::error::Tag $tag does not match pyproject version $version"
+            exit 1
+          fi
+
+      - name: Static validation
+        run: make lint
+
+      - name: Tests
+        run: |
+          python -m pip install -e ".[dev]"
+          make test
+
+      - name: Build the release archives
+        run: make release
+
+      - name: Verify the archives
+        run: make verify-release
+
+      - name: Smoke test the built wheel
+        run: make smoke
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          NAME: ${{ steps.version.outputs.name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          cd dist/release
+          {
+            echo "SPY Constituent Alpha Suite $VERSION"
+            echo
+            echo "Install on Ubuntu 24.04:"
+            echo
+            echo '```bash'
+            echo "curl -fLO https://github.com/${{ github.repository }}/releases/download/$TAG/$NAME.tar.gz"
+            echo "curl -fLO https://github.com/${{ github.repository }}/releases/download/$TAG/$NAME.tar.gz.sha256"
+            echo "sha256sum -c $NAME.tar.gz.sha256"
+            echo "tar -xzf $NAME.tar.gz"
+            echo "cd $NAME"
+            echo "sudo bash install.sh"
+            echo '```'
+            echo
+            echo "The suite installs fail-closed: Tradier sandbox, paper mode,"
+            echo "order submission disabled, APIs bound to 127.0.0.1, and no"
+            echo "production sentinel. See docs/OPERATIONS.md before unlocking."
+            echo
+            echo "## Checksums"
+            echo
+            echo '```'
+            cat "$NAME.tar.gz.sha256" "$NAME.zip.sha256"
+            echo '```'
+            echo
+            echo "\`RELEASE_MANIFEST.sha256\` covers every file inside the archives;"
+            echo "\`scripts/verify_release.sh <archive>\` checks it."
+          } > notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "$NAME.tar.gz" "$NAME.tar.gz.sha256" \
+              "$NAME.zip" "$NAME.zip.sha256" \
+              RELEASE_MANIFEST.sha256 --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" \
+              "$NAME.tar.gz" "$NAME.tar.gz.sha256" \
+              "$NAME.zip" "$NAME.zip.sha256" \
+              RELEASE_MANIFEST.sha256 \
+              --title "SPY Constituent Alpha Suite $VERSION" \
+              --notes-file notes.md
+          fi

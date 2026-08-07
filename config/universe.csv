@@ -1,0 +1,21 @@
+symbol,name,sector,weight
+AAPL,Apple Inc,Information Technology,0.078
+NVDA,NVIDIA Corp,Information Technology,0.076
+MSFT,Microsoft Corp,Information Technology,0.046
+AMZN,Amazon.com Inc,Consumer Discretionary,0.038
+GOOGL,Alphabet Class A,Communication Services,0.031
+AVGO,Broadcom Inc,Information Technology,0.028
+GOOG,Alphabet Class C,Communication Services,0.025
+META,Meta Platforms,Communication Services,0.024
+TSLA,Tesla Inc,Consumer Discretionary,0.019
+BRK/B,Berkshire Hathaway B,Financials,0.018
+JPM,JPMorgan Chase,Financials,0.016
+LLY,Eli Lilly,Health Care,0.015
+WMT,Walmart,Consumer Staples,0.013
+V,Visa,Financials,0.012
+XOM,Exxon Mobil,Energy,0.012
+MA,Mastercard,Financials,0.011
+COST,Costco,Consumer Staples,0.010
+JNJ,Johnson & Johnson,Health Care,0.009
+HD,Home Depot,Consumer Discretionary,0.009
+PG,Procter & Gamble,Consumer Staples,0.009
