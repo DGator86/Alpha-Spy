@@ -4,7 +4,7 @@ import argparse
 import json
 import math
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -698,7 +698,6 @@ def simulate_world(
 def calibration_table(trades: pd.DataFrame, bins: int = 10) -> pd.DataFrame:
     if trades.empty:
         return pd.DataFrame(columns=["bin", "trades", "mean_predicted_probability", "realized_win_rate"])
-    labels = pd.IntervalIndex.from_breaks(np.linspace(0.0, 1.0, bins + 1), closed="right")
     bucket = pd.cut(
         trades["predicted_probability_profit"].clip(0.0, 1.0),
         bins=np.linspace(0.0, 1.0, bins + 1),
@@ -754,7 +753,7 @@ def build_summary(worlds: pd.DataFrame, trades: pd.DataFrame) -> dict:
 
     return {
         "simulation": {
-            "worlds": int(len(worlds)),
+            "worlds": len(worlds),
             "minutes_per_world": MINUTES_PER_DAY,
             "total_simulated_minutes": int(len(worlds) * MINUTES_PER_DAY),
             "constituents": 50,
@@ -766,11 +765,11 @@ def build_summary(worlds: pd.DataFrame, trades: pd.DataFrame) -> dict:
         },
         "portfolio": expiration,
         "trade_rate": float(worlds["trade_taken"].mean()),
-        "trades_in_injected_worlds": int(len(injected_trades)),
-        "trades_in_no_edge_worlds": int(len(no_edge_trades)),
+        "trades_in_injected_worlds": len(injected_trades),
+        "trades_in_no_edge_worlds": len(no_edge_trades),
         "trade_rate_in_injected_worlds": float(len(injected_trades) / max(len(injected_worlds), 1)),
         "active_episode_detection_rate": float(len(active_injected_trades) / max(len(injected_worlds), 1)),
-        "trades_during_active_injected_episode": int(len(active_injected_trades)),
+        "trades_during_active_injected_episode": len(active_injected_trades),
         "trade_rate_in_noninjected_worlds": float(len(no_edge_trades) / max(len(no_edge_worlds), 1)),
         "pnl_in_injected_worlds": float(injected_trades["pnl"].sum()) if not injected_trades.empty else 0.0,
         "pnl_in_no_edge_worlds": float(no_edge_trades["pnl"].sum()) if not no_edge_trades.empty else 0.0,
@@ -861,7 +860,7 @@ def write_report(
         "",
         "A profitable synthetic run means the detection, pricing, execution-cost, and settlement path is behaving coherently under the assumptions encoded here. It does not establish that the assumptions match the live SPY options market. The next valid step is a point-in-time historical replay using synchronized constituent, SPY, SPX, ES, sector ETF, option-chain, dividend, and membership data.",
     ]
-    (output_dir / "REPORT.md").write_text("\n".join(line for line in lines if line != "" or True), encoding="utf-8")
+    (output_dir / "REPORT.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def main() -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -65,7 +65,7 @@ def scan_long_options(
     settings: ScanSettings = ScanSettings(),
     now: datetime | None = None,
 ) -> list[EdgeEstimate]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     results: list[EdgeEstimate] = []
     for row in chain.itertuples(index=False):
         series = pd.Series(row._asdict())
@@ -125,7 +125,7 @@ def scan_vertical_spreads(
     max_width: float = 20.0,
 ) -> list[EdgeEstimate]:
     """Scan debit and credit verticals. Every returned structure has finite maximum loss."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     eligible_rows = []
     for row in chain.itertuples(index=False):
         series = pd.Series(row._asdict())

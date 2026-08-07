@@ -23,7 +23,7 @@ NUMERIC_FEATURES = [
     "predicted_probability_profit", "selection_score", "uncertainty",
     "market_model_skew_gap",
 ]
-FEATURES = NUMERIC_FEATURES + ["structure"]
+FEATURES = [*NUMERIC_FEATURES, "structure"]
 
 
 def enrich(frame: pd.DataFrame) -> pd.DataFrame:
@@ -137,7 +137,7 @@ def main() -> None:
             "uses_hidden_simulator_labels": False,
         },
         "results": {
-            "trades": int(len(selected)),
+            "trades": len(selected),
             "worlds_traded": int(selected["world"].nunique()),
             "win_rate": float(selected["profitable"].mean()) if len(selected) else 0.0,
             "net_pnl": total_pnl,

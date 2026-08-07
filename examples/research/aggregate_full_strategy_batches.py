@@ -57,7 +57,7 @@ def main() -> None:
 
     summary = {
         "worlds": int(worlds["world"].nunique()),
-        "independent_opportunities": int(len(trades)),
+        "independent_opportunities": len(trades),
         "worlds_with_opportunities": int(worlds["trade_taken"].sum()),
         "credit_share": float((trades["premium_style"] == "credit").mean()),
         "independent_aggregate_pnl": float(trades["pnl"].sum()),

@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .timeutil import utc_iso
 
@@ -917,6 +918,7 @@ class Journal:
             ).fetchall()
         total = 0.0
         from datetime import datetime
+
         from .timeutil import ET
         for row in rows:
             if row["status"] == "OPEN":

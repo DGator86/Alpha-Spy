@@ -6,7 +6,6 @@ import threading
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;

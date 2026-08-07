@@ -22,7 +22,7 @@ def shapley_attribution(
     """
     if len(set(components)) != len(components):
         raise ValueError("Component names must be unique")
-    contribution = {name: 0.0 for name in components}
+    contribution = dict.fromkeys(components, 0.0)
     if len(components) <= max_exact_components:
         orders = list(permutations(components))
     else:

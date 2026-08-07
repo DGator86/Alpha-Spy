@@ -1,7 +1,7 @@
 import math
 
-from spy_constituent_alpha.pricing.black_scholes import black_scholes_price, implied_volatility
 from spy_constituent_alpha.pricing.american import american_binomial_price
+from spy_constituent_alpha.pricing.black_scholes import black_scholes_price, implied_volatility
 
 
 def test_implied_volatility_round_trip():

@@ -3,10 +3,10 @@ from __future__ import annotations
 import csv
 import io
 import re
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 import httpx
 import pandas as pd
@@ -162,7 +162,7 @@ class UniverseProvider:
         path = self.config.paths.universe_cache
         if not path.exists():
             return False
-        age = datetime.now(timezone.utc).timestamp() - path.stat().st_mtime
+        age = datetime.now(UTC).timestamp() - path.stat().st_mtime
         return age <= self.config.universe.maximum_age_hours * 3600
 
     def refresh(self, force: bool = False) -> list[Holding]:

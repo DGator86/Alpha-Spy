@@ -130,7 +130,7 @@ def evaluate_selection(frame: pd.DataFrame, selected_mask: np.ndarray, folds: li
     for fold in folds:
         fold_pnl.append(float(selected.loc[selected["world"].isin(fold), "pnl"].sum()))
     return {
-        "trades": int(len(selected)),
+        "trades": len(selected),
         "net_pnl": float(pnl.sum()),
         "average_pnl": float(pnl.mean()),
         "mean_ror": float(ror.mean()),
@@ -212,7 +212,7 @@ def tune_structure(frame: pd.DataFrame, *, minimum_candidates: int = 40) -> tupl
         quantile_thresholds = [
             float(np.quantile(valid_pred, q)) for q in (0.45, 0.55, 0.65, 0.75, 0.82, 0.88)
         ]
-        thresholds = sorted(set([-0.02, 0.0, 0.03, 0.06, 0.10, *quantile_thresholds]))
+        thresholds = sorted({-0.02, 0.0, 0.03, 0.06, 0.10, *quantile_thresholds})
         for threshold in thresholds:
             mask = np.isfinite(preds) & (preds >= threshold)
             metrics = evaluate_selection(frame, mask, folds)
@@ -252,7 +252,7 @@ def tune_structure(frame: pd.DataFrame, *, minimum_candidates: int = 40) -> tupl
         oof_prediction_threshold=threshold,
         final_prediction_threshold=threshold,
         selected_fraction=float(metrics["trades"] / len(frame)),
-        training_candidates=int(len(frame)),
+        training_candidates=len(frame),
         selected_oof_trades=int(metrics["trades"]),
         oof_net_pnl=float(metrics["net_pnl"]),
         oof_average_pnl=float(metrics["average_pnl"]),
@@ -348,8 +348,8 @@ def portfolio_metrics(selected: pd.DataFrame, all_worlds: np.ndarray) -> tuple[d
     drawdown = equity - equity.cummax()
     pnl = selected["pnl"].to_numpy(float) if not selected.empty else np.array([])
     summary = {
-        "worlds": int(len(all_worlds)),
-        "selected_trades": int(len(selected)),
+        "worlds": len(all_worlds),
+        "selected_trades": len(selected),
         "worlds_traded": int(selected["world"].nunique()) if not selected.empty else 0,
         "trade_rate": float(selected["world"].nunique() / max(len(all_worlds), 1)) if not selected.empty else 0.0,
         "net_pnl": float(pnl.sum()) if len(pnl) else 0.0,
@@ -485,9 +485,7 @@ def main() -> None:
     raw = pd.read_csv(args.trades)
     data = add_features(raw)
     training = data[data["batch_id"] <= 2].copy()
-    holdout = data[data["batch_id"] > 2].copy()
     training_worlds = np.array(sorted(training["world"].unique()), dtype=int)
-    holdout_worlds = np.array(sorted(holdout["world"].unique()), dtype=int)
     all_worlds = np.arange(1000, dtype=int)
 
     policies: dict[str, StructurePolicy] = {}

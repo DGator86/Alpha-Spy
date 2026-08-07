@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-from scipy.stats import t
 
 from .covariance import CovarianceForecast
 

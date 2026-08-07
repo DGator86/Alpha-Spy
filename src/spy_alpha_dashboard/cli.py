@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import os
-from pathlib import Path
+from datetime import UTC, datetime
 
 import uvicorn
 
 from .config import get_settings
 from .db import Repository
-from .demo import base_state, seed_history, iso
-from datetime import datetime, timezone
+from .demo import base_state, iso, seed_history
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,13 +37,13 @@ def main() -> None:
         return
     repo = Repository(settings.dashboard_db)
     if args.command == "seed-demo":
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         seed_history(repo, now)
         repo.set_state("live", base_state(now, 0), iso(now))
         print(f"Demo data written to {settings.dashboard_db}")
         return
     if args.command == "doctor":
-        print(f"version=2.0.0")
+        print("version=2.0.0")
         print(f"mode={settings.dashboard_mode}")
         print(f"bind={settings.dashboard_host}:{settings.dashboard_port}")
         print(f"db={settings.dashboard_db}")

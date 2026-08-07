@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -9,7 +9,7 @@ from spy_constituent_alpha.signals.mispricing import ScanSettings, scan_long_opt
 
 def test_scanner_finds_deliberately_underpriced_call():
     rng = np.random.default_rng(3)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     returns = rng.normal(0.01, 0.02, 100_000)
     prices = 100 * (1 + returns)
     q = TerminalDistribution(returns, prices, 100, 3 / 365, "Q")

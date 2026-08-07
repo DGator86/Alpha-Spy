@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import math
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import NormalDist
 
@@ -14,7 +15,6 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from spy_constituent_alpha.backtest.engine import summarize_expiration_backtest
 from spy_constituent_alpha.backtest.metrics import brier_score, calibration_error, log_score
 from spy_constituent_alpha.backtest.professional_exits import SignalState, professional_liquidation
 
@@ -182,7 +182,7 @@ def probability_profit_lognormal(
     strikes = sorted({float(strike) for _, strike, _ in legs})
     bounds = [0.0, *strikes, math.inf]
     probability = 0.0
-    for lower, upper in zip(bounds[:-1], bounds[1:]):
+    for lower, upper in itertools.pairwise(bounds):
         sample = lower + max(1.0, spot * 0.05) if math.isinf(upper) else 0.5 * (lower + upper)
         slope = 0.0
         intercept = -entry_cashflow
@@ -1249,8 +1249,6 @@ def simulate_world(
                 )
 
     trades: list[dict] = []
-    exit_spot = float(spy_prices[exit_minute])
-    exit_tenor = (MINUTES_PER_DAY - exit_minute) / MINUTES_PER_YEAR
     terminal_spot = float(spy_prices[-1])
     for candidate, metadata in best_by_strategy.values():
         professional_exit = professional_liquidation(
@@ -1371,7 +1369,6 @@ def simulate_world(
 def calibration_table(trades: pd.DataFrame, bins: int = 10) -> pd.DataFrame:
     if trades.empty:
         return pd.DataFrame(columns=["bin", "trades", "mean_predicted_probability", "realized_win_rate"])
-    labels = pd.IntervalIndex.from_breaks(np.linspace(0.0, 1.0, bins + 1), closed="right")
     bucket = pd.cut(
         trades["predicted_probability_profit"].clip(0.0, 1.0),
         bins=np.linspace(0.0, 1.0, bins + 1),
@@ -1400,7 +1397,7 @@ def build_summary(worlds: pd.DataFrame, trades: pd.DataFrame) -> dict:
     gross_loss = float(-pnl[pnl < 0].sum()) if len(pnl) else 0.0
     return {
         "simulation": {
-            "worlds": int(len(worlds)),
+            "worlds": len(worlds),
             "minutes_per_world": MINUTES_PER_DAY,
             "total_simulated_minutes": int(len(worlds) * MINUTES_PER_DAY),
             "constituents": 50,
@@ -1413,7 +1410,7 @@ def build_summary(worlds: pd.DataFrame, trades: pd.DataFrame) -> dict:
             "alignment_note": "Historically anchored simulation; not a licensed historical tick replay",
         },
         "tournament": {
-            "independent_opportunities": int(len(trades)),
+            "independent_opportunities": len(trades),
             "worlds_with_opportunities": int(worlds["trade_taken"].sum()),
             "world_opportunity_rate": float(worlds["trade_taken"].mean()),
             "average_opportunities_per_world": float(len(trades) / max(len(worlds), 1)),
@@ -1562,16 +1559,16 @@ def main() -> None:
     summary["simulation"]["world_offset"] = int(args.world_offset)
     (args.output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-    metric_spec = dict(
-        trades=("pnl", "size"),
-        win_rate=("profitable", "mean"),
-        net_pnl=("pnl", "sum"),
-        average_pnl=("pnl", "mean"),
-        median_pnl=("pnl", "median"),
-        average_edge_score=("edge_score", "mean"),
-        average_max_loss=("max_loss", "mean"),
-        average_return_on_risk=("return_on_risk", "mean"),
-    )
+    metric_spec = {
+        "trades": ("pnl", "size"),
+        "win_rate": ("profitable", "mean"),
+        "net_pnl": ("pnl", "sum"),
+        "average_pnl": ("pnl", "mean"),
+        "median_pnl": ("pnl", "median"),
+        "average_edge_score": ("edge_score", "mean"),
+        "average_max_loss": ("max_loss", "mean"),
+        "average_return_on_risk": ("return_on_risk", "mean"),
+    }
     if trades_frame.empty:
         regime_metrics = pd.DataFrame()
         structure_metrics = pd.DataFrame()

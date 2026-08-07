@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -46,7 +47,7 @@ class TradierClient:
     def close(self) -> None:
         self.client.close()
 
-    def __enter__(self) -> "TradierClient":
+    def __enter__(self) -> TradierClient:
         return self
 
     def __exit__(self, *exc_info: Any) -> None:
@@ -306,13 +307,13 @@ def _timestamp_iso(value: Any) -> str | None:
         numeric = float(value)
         if numeric > 10_000_000_000:
             numeric /= 1000.0
-        return datetime.fromtimestamp(numeric, timezone.utc).isoformat().replace("+00:00", "Z")
+        return datetime.fromtimestamp(numeric, UTC).isoformat().replace("+00:00", "Z")
     except (TypeError, ValueError, OSError, OverflowError):
         text = str(value).strip()
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
             if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
         except ValueError:
             return text or None

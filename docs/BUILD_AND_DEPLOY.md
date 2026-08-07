@@ -34,7 +34,7 @@ source .venv/bin/activate
 
 | Command | What it does |
 |---|---|
-| `make lint` | Compiles `src/`, `tests/`, `examples/`; `bash -n` over the installer and operator scripts; `node --check` on the dashboard JavaScript; `systemd-analyze verify` on every unit and timer |
+| `make lint` | Compiles `src/`, `tests/`, `examples/`; `ruff check`; `bash -n` over the installer and operator scripts; `node --check` on the dashboard JavaScript; `systemd-analyze verify` on every unit and timer |
 | `make test` | Runs the test suite (`PYTHONPATH=src:. pytest -q`) |
 | `make build` | Builds the application wheel into `dist/` |
 | `make smoke` | Installs the built wheel into a throwaway virtualenv and exercises it end to end |
@@ -91,14 +91,36 @@ were added, and asserts the installer's prerequisites are present.
 | `static` | blocking | Python compilation, shell syntax, dashboard JavaScript, systemd units |
 | `test` | blocking | Test suite on Python 3.11 and 3.12 |
 | `package` | blocking | `make release`, `make verify-release`, `make smoke`; uploads archives as build artifacts (14 days) |
-| `lint` | advisory | `ruff check`, reported but non-blocking |
-
-Ruff is advisory because the v2.0.0 source carries pre-existing style findings
-(unused imports, `datetime.timezone.utc` over `datetime.UTC`, blind excepts).
-Clearing them is a separate change; until then the job keeps the drift visible
-without blocking merges.
+| `lint` | blocking | `ruff check` over `src`, `tests` and `examples` |
 
 Runners are pinned to `ubuntu-24.04` to match the deployment target.
+
+### The ruff rule set is pinned deliberately
+
+`pyproject.toml` selects an explicit rule set (`E`, `W`, `F`, `I`, `UP`, `B`,
+`C4`, `SIM`, `RUF`). This matters: with only `line-length` configured, ruff
+applies whatever its current default is — 826 rules as of 0.16 — so a ruff
+upgrade would reintroduce findings in a tree that was clean the day before.
+Pinning makes the gate stable and upgrades a deliberate act.
+
+Four things are excluded on purpose, because clearing them would mean changing
+behaviour rather than tidying it:
+
+| Excluded | Why |
+|---|---|
+| `E501` line-too-long | 542 findings. The research and strategy modules carry long literal tables and report strings; `line-length` still guides formatters. |
+| `BLE001` blind-except, `S110` try-except-pass | The market, universe and backup paths catch broad exceptions on purpose, so a bad feed degrades data health instead of killing a service mid-session. |
+| `FURB` | Opinionated rewrites over timestamp parsing in the audit tape. |
+| `PYI` | No stub files in this project. |
+
+Two narrower exemptions are configured rather than fixed:
+
+- `B008` is waived for `typer.Argument`/`Option`, `pandas.Timedelta` and
+  `ScanSettings` via `extend-immutable-calls`. Each is either framework API or
+  immutable — `ScanSettings` is a `@dataclass(frozen=True)` that is only ever
+  read — so the shared default instance is intentional, not a latent bug.
+- `E402` is waived under `examples/`, where the research drivers put
+  `<repo>/src` on `sys.path` before importing the package.
 
 ## Publishing a release
 

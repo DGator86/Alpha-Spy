@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 
 from .config import SuiteConfig
 from .db import Journal
@@ -46,7 +46,7 @@ def build_multileg_payload(candidate: dict[str, Any], quantity: int, price: floa
 
 
 class ExecutionManager:
-    TERMINAL = {"FILLED", "REJECTED", "CANCELED", "EXPIRED", "ERROR"}
+    TERMINAL: ClassVar[set[str]] = {"FILLED", "REJECTED", "CANCELED", "EXPIRED", "ERROR"}
 
     def __init__(self, config: SuiteConfig, journal: Journal):
         self.config = config

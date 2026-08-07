@@ -140,8 +140,8 @@ class ProfessionalEnsemble:
                 max_iter=190, learning_rate=0.045, max_leaf_nodes=15,
                 min_samples_leaf=35, l2_regularization=4.0, random_state=9200 + i,
             ))
-            common = dict(max_iter=170, learning_rate=0.045, max_leaf_nodes=12,
-                          min_samples_leaf=28, l2_regularization=6.0)
+            common = {"max_iter": 170, "learning_rate": 0.045, "max_leaf_nodes": 12,
+                      "min_samples_leaf": 28, "l2_regularization": 6.0}
             self.win_size_models.append(HistGradientBoostingRegressor(**common, random_state=9300 + i))
             self.loss_size_models.append(HistGradientBoostingRegressor(**common, random_state=9400 + i))
             self.loss_q90_models.append(HistGradientBoostingRegressor(
@@ -288,7 +288,7 @@ def metrics(frame: pd.DataFrame) -> dict:
     aw = float(winners.mean()) if len(winners) else 0.0
     al = float(losers.mean()) if len(losers) else 0.0
     return {
-        "trades": int(len(frame)), "win_rate": float(frame.profitable.mean()),
+        "trades": len(frame), "win_rate": float(frame.profitable.mean()),
         "net_pnl": float(frame.pnl.sum()), "average_pnl": float(frame.pnl.mean()),
         "median_pnl": float(frame.pnl.median()), "profit_factor": profit_factor(frame.pnl),
         "average_win": aw, "average_loss": al, "win_loss_ratio": aw / al if al else math.inf,

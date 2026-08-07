@@ -112,7 +112,7 @@ def implied_equicorrelation(
     w = w / w.sum()
     diagonal = float(np.sum((w.to_numpy() ** 2) * (sigma.to_numpy() ** 2)))
     weighted_vol = w.to_numpy() * sigma.to_numpy()
-    cross = float((weighted_vol.sum() ** 2 - np.sum(weighted_vol**2)))
+    cross = float(weighted_vol.sum() ** 2 - np.sum(weighted_vol**2))
     if cross <= 0:
         return 0.0
     return float((index_variance - diagonal) / cross)

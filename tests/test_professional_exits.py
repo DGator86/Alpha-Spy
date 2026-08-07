@@ -4,19 +4,18 @@ import numpy as np
 
 from spy_constituent_alpha.backtest.professional_exits import SignalState, professional_liquidation
 
-
 MINUTES_PER_YEAR = 252 * 390
 
 
 def _candidate(**overrides):
-    data = dict(
-        name="LONG_CALL",
-        family="directional_long",
-        legs=[("C", 100.0, 1)],
-        entry_cashflow=1.0,
-        max_loss=1.0,
-        max_profit=float("inf"),
-    )
+    data = {
+        "name": "LONG_CALL",
+        "family": "directional_long",
+        "legs": [("C", 100.0, 1)],
+        "entry_cashflow": 1.0,
+        "max_loss": 1.0,
+        "max_profit": float("inf"),
+    }
     data.update(overrides)
     return SimpleNamespace(**data)
 

@@ -12,8 +12,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "examples"))
 
-from promote_full_strategy_tournament import (  # noqa: E402
-    aggregate_metrics,
+from promote_full_strategy_tournament import (
     bucketize,
     portfolio_summary,
     select_promoted_portfolio,
@@ -44,7 +43,7 @@ def expected_calibration_error(frame: pd.DataFrame, bins: int = 10) -> tuple[flo
         ece += weight * abs(pred - realized)
         rows.append({
             "probability_bin": str(interval),
-            "trades": int(len(group)),
+            "trades": len(group),
             "mean_predicted_probability": pred,
             "realized_win_rate": realized,
             "absolute_gap": abs(pred - realized),
@@ -67,9 +66,9 @@ def group_metrics(frame: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     for keys, group in frame.groupby(cols, observed=False):
         if not isinstance(keys, tuple):
             keys = (keys,)
-        row = dict(zip(cols, keys))
+        row = dict(zip(cols, keys, strict=True))
         row.update({
-            "trades": int(len(group)),
+            "trades": len(group),
             "net_pnl": float(group["pnl"].sum()),
             "average_pnl": float(group["pnl"].mean()),
             "median_pnl": float(group["pnl"].median()),

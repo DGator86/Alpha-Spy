@@ -7,9 +7,7 @@ import pytest
 from spy_der.config import SuiteConfig
 from spy_der.db import Journal
 from spy_der.execution import build_multileg_payload
-from spy_der.features import compute_features
-from spy_der.prediction import create_prediction
-from spy_der.services import ConfirmationService, DojoService, EngineService, MarketService, SettlementService
+from spy_der.services import ConfirmationService, DojoService, EngineService, MarketService
 from spy_der.strategy import generate_candidates
 from spy_der.tradier import normalize_quote
 

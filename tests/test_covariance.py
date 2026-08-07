@@ -4,7 +4,6 @@ import pandas as pd
 from spy_constituent_alpha.models.covariance import (
     DynamicCovarianceModel,
     implied_equicorrelation,
-    portfolio_variance,
 )
 
 

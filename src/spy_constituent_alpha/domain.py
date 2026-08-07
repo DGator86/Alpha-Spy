@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class OptionRight(str, Enum):
+class OptionRight(StrEnum):
+    # StrEnum, not (str, Enum): the codebase reads option rights via
+    # str(row.right).startswith("C"), and (str, Enum) makes str() return
+    # "OptionRight.CALL" rather than "C", which that idiom would misread.
     CALL = "C"
     PUT = "P"
 
