@@ -9,7 +9,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-PATTERN='spy_der|spy-der|zerodte|pre-v2|spy-drive-backup|suite-v2|command-center-v2'
+PATTERN='spy_der|spy-der|spy_alpha_dashboard|spy_constituent_alpha|zerodte|pre-v2|spy-drive-backup|suite-v2|command-center-v2'
 
 # Build output and tool caches are not source; .git holds immutable history.
 # This script is excluded because it necessarily spells out the pattern.

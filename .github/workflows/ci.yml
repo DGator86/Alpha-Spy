@@ -40,7 +40,7 @@ jobs:
         run: bash -n install.sh scripts/*.sh scripts/alpha-spy-backup
 
       - name: Dashboard JavaScript syntax
-        run: node --check src/spy_alpha_dashboard/static/app.js
+        run: node --check src/alpha_spy/dashboard/static/app.js
 
       - name: systemd units and timers
         run: bash scripts/verify_units.sh

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from spy_constituent_alpha.models.coverage import complete_by_sector
+from alpha_spy.research.models.coverage import complete_by_sector
 
 
 def test_missing_coverage_is_imputed_and_penalized():

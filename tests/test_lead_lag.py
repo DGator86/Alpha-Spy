@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from spy_constituent_alpha.models.lead_lag import DistributedLagForecaster, cross_correlation_profile
+from alpha_spy.research.models.lead_lag import DistributedLagForecaster, cross_correlation_profile
 
 
 def test_detects_positive_lead():

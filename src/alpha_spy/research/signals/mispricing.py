@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from spy_constituent_alpha.domain import EdgeEstimate
-from spy_constituent_alpha.models.physical import TerminalDistribution
+from alpha_spy.research.domain import EdgeEstimate
+from alpha_spy.research.models.physical import TerminalDistribution
 
 
 @dataclass(frozen=True)

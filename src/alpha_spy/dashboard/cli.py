@@ -27,7 +27,7 @@ def main() -> None:
     settings = get_settings()
     if args.command == "serve":
         uvicorn.run(
-            "spy_alpha_dashboard.app:app",
+            "alpha_spy.dashboard.app:app",
             host=args.host or settings.dashboard_host,
             port=args.port or settings.dashboard_port,
             log_level=args.log_level,

@@ -13,8 +13,8 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from spy_constituent_alpha.backtest.engine import summarize_expiration_backtest
-from spy_constituent_alpha.backtest.metrics import brier_score, calibration_error, log_score
+from alpha_spy.research.backtest.engine import summarize_expiration_backtest
+from alpha_spy.research.backtest.metrics import brier_score, calibration_error, log_score
 
 MINUTES_PER_DAY = 390
 MINUTES_PER_YEAR = 252 * MINUTES_PER_DAY

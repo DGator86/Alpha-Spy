@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from spy_constituent_alpha.backtest.professional_exits import SignalState, professional_liquidation
+from alpha_spy.research.backtest.professional_exits import SignalState, professional_liquidation
 
 MINUTES_PER_YEAR = 252 * 390
 
