@@ -1,4 +1,4 @@
-from spy_constituent_alpha.signals.attribution import shapley_attribution
+from alpha_spy.research.signals.attribution import shapley_attribution
 
 
 def test_shapley_adds_to_total_increment():

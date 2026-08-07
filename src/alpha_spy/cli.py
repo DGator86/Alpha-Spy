@@ -177,10 +177,10 @@ def main() -> None:
         uvicorn.run("alpha_spy.decision_api:app", host=args.host, port=args.port, log_level="info")
     elif args.command == "dashboard-api":
         _configure_dashboard_env(config)
-        from spy_alpha_dashboard.config import get_settings
+        from alpha_spy.dashboard.config import get_settings
         get_settings.cache_clear()
         uvicorn.run(
-            "spy_alpha_dashboard.app:app",
+            "alpha_spy.dashboard.app:app",
             host=args.host or config.dashboard.host,
             port=args.port or config.dashboard.port,
             log_level="info",

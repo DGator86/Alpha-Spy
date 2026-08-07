@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from spy_constituent_alpha.domain import EdgeEstimate
+from alpha_spy.research.domain import EdgeEstimate
 
 
 def edges_to_frame(edges: list[EdgeEstimate]) -> pd.DataFrame:

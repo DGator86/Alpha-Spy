@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import typer
 
-from spy_constituent_alpha.config import load_settings
+from alpha_spy.research.config import load_settings
 
 app = typer.Typer(no_args_is_help=True)
 

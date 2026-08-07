@@ -35,7 +35,7 @@ lint:
 	bash -n install.sh scripts/*.sh scripts/alpha-spy-backup
 	@if command -v ruff >/dev/null; then ruff check src tests examples; \
 		else echo "ruff not installed (make venv); skipped lint"; fi
-	@if command -v node >/dev/null; then node --check src/spy_alpha_dashboard/static/app.js; \
+	@if command -v node >/dev/null; then node --check src/alpha_spy/dashboard/static/app.js; \
 		else echo "node not installed; skipped dashboard javascript check"; fi
 	bash scripts/verify_units.sh
 

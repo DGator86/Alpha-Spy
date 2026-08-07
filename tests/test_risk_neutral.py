@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from spy_constituent_alpha.models.risk_neutral import (
+from alpha_spy.research.models.risk_neutral import (
     SmileSlice,
     SyntheticRiskNeutralModel,
     build_smile_slice,

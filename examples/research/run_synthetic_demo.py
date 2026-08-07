@@ -10,15 +10,15 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from spy_constituent_alpha.models.covariance import DynamicCovarianceModel
-from spy_constituent_alpha.models.physical import PhysicalDistributionModel
-from spy_constituent_alpha.models.risk_neutral import (
+from alpha_spy.research.models.covariance import DynamicCovarianceModel
+from alpha_spy.research.models.physical import PhysicalDistributionModel
+from alpha_spy.research.models.risk_neutral import (
     SyntheticRiskNeutralModel,
     build_smile_slice,
 )
-from spy_constituent_alpha.signals.mispricing import ScanSettings, scan_long_options, scan_vertical_spreads
-from spy_constituent_alpha.signals.ranking import edges_to_frame
-from spy_constituent_alpha.signals.structures import (
+from alpha_spy.research.signals.mispricing import ScanSettings, scan_long_options, scan_vertical_spreads
+from alpha_spy.research.signals.ranking import edges_to_frame
+from alpha_spy.research.signals.structures import (
     scan_butterflies,
     scan_credit_verticals,
     scan_iron_condors,

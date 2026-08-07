@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from alpha_spy.config import SuiteConfig
+from alpha_spy.dashboard.db import Repository
 from alpha_spy.db import Journal
-from spy_alpha_dashboard.db import Repository
 
 linux_only = pytest.mark.skipif(
     not sys.platform.startswith("linux") or not os.path.isdir("/proc/self/fd"),

@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pandas as pd
 
-from spy_constituent_alpha.models.physical import TerminalDistribution
-from spy_constituent_alpha.signals.mispricing import ScanSettings, scan_long_options
+from alpha_spy.research.models.physical import TerminalDistribution
+from alpha_spy.research.signals.mispricing import ScanSettings, scan_long_options
 
 
 def test_scanner_finds_deliberately_underpriced_call():

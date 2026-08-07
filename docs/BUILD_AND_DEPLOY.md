@@ -247,7 +247,7 @@ ever gains an external resource reference. Enable it once under
 ## Repository layout
 
 ```text
-src/            alpha_spy (suite), spy_constituent_alpha (research), spy_alpha_dashboard (GUI)
+src/            alpha_spy (suite), alpha_spy.research (research), alpha_spy.dashboard (GUI)
 tests/          test suite
 examples/       research drivers
 config/         shipped fail-closed configuration and constituent universe

@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from spy_constituent_alpha.domain import EdgeEstimate
-from spy_constituent_alpha.models.physical import TerminalDistribution
-from spy_constituent_alpha.signals.mispricing import (
+from alpha_spy.research.domain import EdgeEstimate
+from alpha_spy.research.models.physical import TerminalDistribution
+from alpha_spy.research.signals.mispricing import (
     ScanSettings,
     discounted_expected_payoff,
     quote_is_eligible,
