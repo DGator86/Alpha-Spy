@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.0.0 — 2026-08-10
+
+- Unified the production-real-time-data / Tradier-sandbox-paper operating mode.
+- Added 5m/15m/30m/60m/120m/EOD/1D/5D forecast horizons with bounded compute cadences.
+- Wired dynamic-covariance Student-t physical P and constituent-smile synthetic Q distributions into runtime.
+- Added implied-vs-realized correlation risk premium, uncertainty scoring and doubled-cost candidate gates.
+- Added path archetype, level-touch order, continuation/reversal, squeeze/liquidation, MFE/MAE and IV-change forecasts.
+- Added hierarchical micro/intraday/swing/structural regime classification with cross-horizon transition risk.
+- Expanded real-time context with HYG, UUP, Treasury ETF proxies, VIX-family indices, sectors and stream microstructure proxies.
+- Added versioned event-calendar ingestion; stale/missing/out-of-coverage calendars fail closed.
+- Added deterministic captured-tape replay and persisted replay manifests.
+- Added objective paper-promotion evaluation across data, forecast calibration, P&L, doubled costs, drawdown, fills, reconciliation, modeled loss, regimes and replay consistency.
+- Made paper validation incapable of automatically enabling live money; passed reports only become eligible for manual review.
+- Bound any later production approval to a passed validation report, model version, configuration/validation fingerprint and evidence SHA-256.
+- Added nightly validation systemd service/timer and an optional premarket event-calendar refresh timer.
+- Dashboard state now surfaces the full horizon stack, P/Q diagnostics, hierarchical regime/context, replay and promotion gates.
+
+
 ## Unreleased
 
 ### Clean break: Alpha-SPY

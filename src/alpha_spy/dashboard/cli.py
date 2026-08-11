@@ -43,7 +43,7 @@ def main() -> None:
         print(f"Demo data written to {settings.dashboard_db}")
         return
     if args.command == "doctor":
-        print("version=2.0.0")
+        print("version=3.0.0")
         print(f"mode={settings.dashboard_mode}")
         print(f"bind={settings.dashboard_host}:{settings.dashboard_port}")
         print(f"db={settings.dashboard_db}")

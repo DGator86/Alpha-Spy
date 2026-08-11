@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Alpha-SPY event calendar before the session
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:15:00 America/New_York
+Persistent=true
+AccuracySec=1m
+Unit=alpha-spy-event-calendar.service
+
+[Install]
+WantedBy=timers.target

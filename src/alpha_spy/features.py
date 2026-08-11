@@ -111,7 +111,13 @@ def compute_features(
         else _clip(covered_weight / max(config.universe.minimum_covered_weight, 1e-9), 0.0, 1.0)
     )
     freshness_factor = _clip(1.0 - stale_fraction * 2.0, 0.0, 1.0)
-    source_factor = 1.0 if snapshot.get("source") == "tradier" else 0.90 if is_demo else 0.72
+    source_factor = (
+        1.0
+        if snapshot.get("source") in {"tradier", "tradier_production_stream"}
+        else 0.90
+        if is_demo
+        else 0.72
+    )
     stability_factor = 1.0
     if correlation is not None and not math.isfinite(correlation):
         stability_factor = 0.5

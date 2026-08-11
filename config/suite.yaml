@@ -7,36 +7,44 @@ paths:
   report_dir: /var/lib/alpha-spy/reports
   log_dir: /var/log/alpha-spy
   production_sentinel: /etc/alpha-spy/PRODUCTION_UNLOCKED
-
+  production_approval: /etc/alpha-spy/PRODUCTION_APPROVED.json
+  event_calendar: /etc/alpha-spy/events.json
+  promotion_report: /var/lib/alpha-spy/reports/promotion-latest.json
 tradier:
   environment: sandbox
-  access_token: ""
-  account_id: ""
-  timeout_seconds: 20
+  access_token: ''
+  account_id: ''
+  market_environment: production
+  market_access_token: ''
+  timeout_seconds: 20.0
   market_data_chunk_size: 150
   preview_orders: true
-  stream_enabled: false
-
+  stream_enabled: true
 universe:
   source: ssga_spy
   source_url: https://www.ssga.com/us/en/institutional/library-content/products/fund-data/etfs/us/holdings-daily-us-en-spy.xlsx
   fallback_source_urls:
-    - https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
+  - https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf/1467271812596.ajax?fileType=csv&fileName=IVV_holdings&dataType=fund
   local_csv: /etc/alpha-spy/universe.csv
   refresh_hour_et: 7
   maximum_age_hours: 36
   minimum_symbols: 450
   top_n_quotes: 503
   top_n_option_iv: 40
-  minimum_covered_weight: 0.90
-
+  minimum_covered_weight: 0.9
 market:
   poll_interval_seconds: 60
+  stream_snapshot_interval_seconds: 60
+  stream_stale_seconds: 15
+  option_chain_refresh_seconds: 30
   quote_stale_seconds: 120
   option_quote_stale_seconds: 180
   collect_only_market_hours: false
   demo_when_unconfigured: true
-  include_symbols: [SPY, QQQ, IWM]
+  include_symbols:
+  - SPY
+  - QQQ
+  - IWM
   option_expiration_mode: zero_dte
   option_chain_greeks: true
   max_option_chain_rows: 800
@@ -45,58 +53,174 @@ market:
   constituent_iv_max_age_minutes: 20
   iv_reference_min_dte: 3
   iv_reference_max_dte: 14
-
+  event_state_default: ordinary
 prediction:
   horizon_minutes: 15
+  horizons:
+  - name: 5m
+    minutes: 5
+    role: timing
+    trade_eligible: false
+    cadence_minutes: 1
+  - name: 15m
+    minutes: 15
+    role: primary
+    trade_eligible: true
+    cadence_minutes: 1
+  - name: 30m
+    minutes: 30
+    role: primary
+    trade_eligible: false
+    cadence_minutes: 1
+  - name: 60m
+    minutes: 60
+    role: advisory
+    trade_eligible: false
+    cadence_minutes: 5
+  - name: 120m
+    minutes: 120
+    role: advisory
+    trade_eligible: false
+    cadence_minutes: 5
+  - name: EOD
+    minutes: 390
+    role: advisory
+    trade_eligible: false
+    cadence_minutes: 5
+  - name: 1D
+    minutes: 390
+    role: research
+    trade_eligible: false
+    cadence_minutes: 15
+  - name: 5D
+    minutes: 1950
+    role: research
+    trade_eligible: false
+    cadence_minutes: 15
   minimum_history_rows: 30
-  return_lookback_rows: 60
+  return_lookback_rows: 240
   distribution_z: 1.28
   min_sigma_return: 0.00045
-  max_sigma_return: 0.012
+  max_sigma_return: 0.045
   pressure_coefficient: 0.35
-  residual_coefficient: 0.20
+  residual_coefficient: 0.2
   breadth_coefficient: 0.08
   mean_reversion_coefficient: 0.05
-  model_version: constituent-linear-v2.0.0
-
+  ridge_enabled: true
+  ridge_min_samples: 200
+  ridge_lookback: 5000
+  ridge_alpha_by_horizon:
+    5m: 1.0
+    15m: 1.0
+    30m: 1.0e-05
+    60m: 1.0
+    120m: 1.0
+    EOD: 1.0
+    1D: 1.0
+    5D: 1.0
+  shadow_model_enabled: true
+  shadow_model_min_samples: 500
+  shadow_model_lookback: 3000
+  shadow_model_max_iter: 80
+  regime_calibration_min_samples: 30
+  global_calibration_min_samples: 100
+  calibration_lookback: 5000
+  physical_paths: 6000
+  risk_neutral_paths: 6000
+  covariance_symbols: 120
+  covariance_lookback_rows: 240
+  minimum_covariance_observations: 30
+  minimum_pq_surface_weight: 0.25
+  max_model_uncertainty: 0.025
+  model_version: alpha-spy-full-decision-v3.0.0
+context:
+  futures_proxies:
+    ES: SPY
+    NQ: QQQ
+    RTY: IWM
+  credit_symbol: HYG
+  dollar_symbol: UUP
+  rates_symbols:
+  - SHY
+  - IEF
+  - TLT
+  volatility_symbols:
+  - VIX
+  - VIX9D
+  - VIX3M
+  sector_symbols:
+  - XLC
+  - XLY
+  - XLP
+  - XLE
+  - XLF
+  - XLV
+  - XLI
+  - XLB
+  - XLRE
+  - XLK
+  - XLU
+  require_credit_proxy: true
+  require_dollar_proxy: false
+  require_volatility_index: false
+  minimum_context_coverage: 0.75
+  event_calendar_enabled: true
+  event_calendar_required: true
+  event_calendar_url: ''
+  event_calendar_max_age_hours: 36
+  event_pre_minutes: 30
+  event_post_minutes: 30
+  block_macro_event_entries: true
+  block_rebalance_entries: true
 strategy:
   enabled_families:
-    - LONG_CALL
-    - LONG_PUT
-    - CALL_DEBIT_SPREAD
-    - PUT_DEBIT_SPREAD
-    - BULL_PUT_CREDIT_SPREAD
-    - BEAR_CALL_CREDIT_SPREAD
-    - LONG_STRANGLE
-    - LONG_STRADDLE
-    - IRON_CONDOR
-    - CALL_BUTTERFLY
-    - PUT_BUTTERFLY
+  - LONG_CALL
+  - LONG_PUT
+  - CALL_DEBIT_SPREAD
+  - PUT_DEBIT_SPREAD
+  - BULL_PUT_CREDIT_SPREAD
+  - BEAR_CALL_CREDIT_SPREAD
+  - LONG_STRANGLE
+  - LONG_STRADDLE
+  - IRON_CONDOR
+  - CALL_BUTTERFLY
+  - PUT_BUTTERFLY
   min_open_interest: 25
   min_volume: 1
   max_relative_spread: 0.35
-  min_credit: 0.10
-  max_debit: 3.50
+  min_credit: 0.1
+  max_debit: 3.5
   max_width: 10.0
   min_edge_dollars: 0.03
-  min_probability: 0.60
+  min_probability: 0.6
   max_candidates_per_cycle: 40
-
+  assumed_expiry_time_et: '16:00'
+  minimum_horizon_tenor_seconds: 1
+  q_iv_floor: 0.01
+  q_iv_cap: 5.0
+  min_edge_to_uncertainty: 0.75
+  require_positive_doubled_cost_ev: true
+  require_multi_horizon_alignment: true
 risk:
   maximum_contracts: 1
   maximum_trades_per_day: 1
-  maximum_trade_risk_dollars: 100
+  maximum_trade_risk_dollars: 100.0
   account_risk_fraction: 0.0025
-  daily_loss_limit_dollars: 200
+  daily_loss_limit_dollars: 200.0
   minimum_trust_to_trade: 0.75
-  yellow_risk_multiplier: 0.50
+  yellow_risk_multiplier: 0.5
   orange_risk_multiplier: 0.25
-  forced_flat_time_et: "15:55"
-  entry_start_time_et: "09:40"
-  entry_stop_time_et: "15:15"
+  forced_flat_time_et: '15:55'
+  entry_start_time_et: 09:40
+  entry_stop_time_et: '15:15'
+  entry_grid_minutes: 5
+  exit_monitor_interval_seconds: 60
   block_on_incomplete_universe: true
   block_on_stale_data: true
-
+  require_verified_option_chain: true
+  require_verified_surface: true
+  minimum_surface_coverage: 0.35
+  block_on_broker_reconciliation: true
 trading:
   enabled: false
   paper_mode: true
@@ -106,7 +230,10 @@ trading:
   limit_price_wait_seconds: 8
   cancel_confirm_seconds: 15
   tag_prefix: ALPHASPY
-
+  fee_per_contract: 0.65
+  slippage_fraction_of_spread: 0.25
+  minimum_slippage: 0.01
+  force_market_exit_after_limit_failure: true
 audit:
   enabled: true
   confirmation_interval_seconds: 30
@@ -116,22 +243,57 @@ audit:
   minimum_promotion_sessions: 20
   minimum_promotion_forecasts: 500
   health_green: 0.75
-  health_yellow: 0.50
-  health_orange: 0.30
-
+  health_yellow: 0.5
+  health_orange: 0.3
+validation:
+  enabled: true
+  minimum_paper_sessions: 60
+  minimum_matured_forecasts: 5000
+  minimum_primary_horizon_samples: 750
+  minimum_paper_trades: 60
+  minimum_verified_data_fraction: 0.99
+  minimum_trained_primary_fraction: 0.9
+  minimum_direction_accuracy_15m: 0.53
+  minimum_direction_wilson_lcb_15m: 0.5
+  maximum_brier_15m: 0.245
+  minimum_brier_skill_15m: 0.01
+  minimum_direction_accuracy_30m: 0.525
+  minimum_direction_wilson_lcb_30m: 0.5
+  maximum_brier_30m: 0.25
+  minimum_brier_skill_30m: 0.0
+  minimum_interval_coverage: 0.72
+  maximum_interval_coverage: 0.88
+  confidence_level: 0.95
+  minimum_net_pnl: 0.0
+  minimum_profit_factor: 1.15
+  minimum_expectancy_lcb_dollars: 0.0
+  maximum_drawdown_dollars: 600.0
+  minimum_doubled_cost_pnl: 0.0
+  recent_trade_window: 20
+  minimum_recent_net_pnl: 0.0
+  minimum_recent_profit_factor: 1.0
+  maximum_mean_fill_slippage_dollars: 12.0
+  minimum_broker_fill_fraction: 0.95
+  maximum_reconciliation_blocks: 0
+  maximum_realized_loss_to_model_ratio: 1.1
+  minimum_regime_trades: 5
+  minimum_tested_regimes: 3
+  minimum_regime_coverage_fraction: 0.75
+  require_nonnegative_regime_expectancy: true
+  require_replay_consistency: true
+  replay_sample_predictions: 60
 dashboard:
   host: 127.0.0.1
   port: 8788
   mode: live
   require_view_token: true
-  view_token: ""
-  admin_token: ""
-  ingest_token: ""
+  view_token: ''
+  admin_token: ''
+  ingest_token: ''
   websocket_interval_seconds: 1.0
-
 backup:
   enabled: true
-  remote: "gdrive:SPY Trading Backups/srv1575978"
-  time_et: "17:00"
+  remote: gdrive:SPY Trading Backups/srv1575978
+  time_et: '17:00'
   keep_daily_database_snapshots: true
   copy_raw_data: true

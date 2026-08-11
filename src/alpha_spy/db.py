@@ -346,6 +346,31 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     max_drawdown REAL NOT NULL DEFAULT 0,
     payload_json TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS validation_runs (
+    validation_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    model_version TEXT NOT NULL,
+    config_hash TEXT NOT NULL,
+    sessions INTEGER NOT NULL,
+    matured_forecasts INTEGER NOT NULL,
+    trades INTEGER NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_validation_runs_time ON validation_runs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS replay_runs (
+    replay_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    start_at TEXT,
+    end_at TEXT,
+    samples INTEGER NOT NULL,
+    mismatches INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_replay_runs_time ON replay_runs(created_at DESC);
 """
 
 
@@ -409,7 +434,7 @@ class Journal:
                     "ALTER TABLE predictions ADD COLUMN formal_anchor INTEGER NOT NULL DEFAULT 0"
                 )
             con.execute(
-                "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','2.0.0')"
+                "INSERT OR REPLACE INTO schema_meta(key,value) VALUES('schema_version','3.0.0')"
             )
 
     @staticmethod
@@ -625,6 +650,34 @@ class Journal:
         """
         with self.session() as con:
             rows = con.execute(sql, [*symbols, not_before_iso]).fetchall()
+        output = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            output.append(item)
+        return output
+
+    def latest_constituent_iv_as_of(
+        self, symbols: list[str], not_before_iso: str, as_of_iso: str
+    ) -> list[dict[str, Any]]:
+        if not symbols:
+            return []
+        placeholders = ",".join("?" for _ in symbols)
+        sql = f"""
+            SELECT o.*
+            FROM constituent_iv_observations o
+            JOIN (
+                SELECT symbol, MAX(captured_at) AS captured_at
+                FROM constituent_iv_observations
+                WHERE symbol IN ({placeholders})
+                  AND captured_at >= ? AND captured_at <= ?
+                GROUP BY symbol
+            ) latest
+              ON latest.symbol=o.symbol AND latest.captured_at=o.captured_at
+            ORDER BY o.weight DESC
+        """
+        with self.session() as con:
+            rows = con.execute(sql, [*symbols, not_before_iso, as_of_iso]).fetchall()
         output = []
         for row in rows:
             item = dict(row)
@@ -952,6 +1005,24 @@ class Journal:
                 total += float(row["realized_pnl"] or 0.0)
         return total
 
+    def snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
+        with self.session() as con:
+            row = con.execute("SELECT * FROM market_snapshots WHERE snapshot_id=?", (snapshot_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        return item
+
+    def features_for_snapshot(self, snapshot_id: str) -> dict[str, Any] | None:
+        with self.session() as con:
+            row = con.execute("SELECT * FROM features WHERE snapshot_id=?", (snapshot_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        return item
+
     def latest_snapshot(self) -> dict[str, Any] | None:
         with self.session() as con:
             row = con.execute(
@@ -966,6 +1037,63 @@ class Journal:
     def latest_features(self) -> dict[str, Any] | None:
         with self.session() as con:
             row = con.execute("SELECT * FROM features ORDER BY created_at DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        return item
+
+    def latest_prediction_for_horizon(self, horizon_name: str) -> dict[str, Any] | None:
+        pattern = f'%"horizon_name":"{horizon_name}"%'
+        # json_extract is available on supported SQLite builds, but the LIKE fallback
+        # keeps the journal portable across minimal Ubuntu SQLite packages.
+        with self.session() as con:
+            try:
+                row = con.execute(
+                    """
+                    SELECT * FROM predictions
+                    WHERE json_extract(payload_json, '$.horizon_name')=?
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (horizon_name,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                row = con.execute(
+                    "SELECT * FROM predictions WHERE payload_json LIKE ? ORDER BY created_at DESC LIMIT 1",
+                    (pattern,),
+                ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        return item
+
+    def latest_predictions_by_horizon(self) -> dict[str, dict[str, Any]]:
+        output: dict[str, dict[str, Any]] = {}
+        with self.session() as con:
+            rows = con.execute(
+                "SELECT * FROM predictions ORDER BY created_at DESC LIMIT 500"
+            ).fetchall()
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            name = str(item.get("payload", {}).get("horizon_name") or f"{item['horizon_minutes']}m")
+            if name not in output:
+                output[name] = item
+        return output
+
+    def latest_validation_run(self) -> dict[str, Any] | None:
+        with self.session() as con:
+            row = con.execute("SELECT * FROM validation_runs ORDER BY created_at DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        return item
+
+    def latest_replay_run(self) -> dict[str, Any] | None:
+        with self.session() as con:
+            row = con.execute("SELECT * FROM replay_runs ORDER BY created_at DESC LIMIT 1").fetchone()
         if not row:
             return None
         item = dict(row)
@@ -1020,7 +1148,7 @@ class Journal:
         with self.session() as con:
             rows = con.execute(
                 """
-                SELECT s.captured_at,q.price,q.bid,q.ask,q.change_pct,q.weight
+                SELECT s.captured_at,q.price,q.bid,q.ask,q.change_pct,q.weight,q.volume
                 FROM snapshot_quotes q
                 JOIN market_snapshots s ON s.snapshot_id=q.snapshot_id
                 WHERE q.symbol=? AND q.price IS NOT NULL
@@ -1029,6 +1157,78 @@ class Journal:
                 (symbol, limit),
             ).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+    def quote_history_as_of(
+        self, symbol: str, as_of_iso: str, limit: int = 120
+    ) -> list[dict[str, Any]]:
+        with self.session() as con:
+            rows = con.execute(
+                """
+                SELECT s.captured_at,q.price,q.bid,q.ask,q.change_pct,q.weight,q.volume
+                FROM snapshot_quotes q
+                JOIN market_snapshots s ON s.snapshot_id=q.snapshot_id
+                WHERE q.symbol=? AND q.price IS NOT NULL AND s.captured_at <= ?
+                ORDER BY s.captured_at DESC LIMIT ?
+                """,
+                (symbol, as_of_iso, limit),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def constituent_return_matrix(
+        self, symbols: list[str], as_of_iso: str, limit: int
+    ) -> list[dict[str, Any]]:
+        if not symbols:
+            return []
+        placeholders = ",".join("?" for _ in symbols)
+        sql = f"""
+            SELECT s.captured_at,q.symbol,q.price,q.weight
+            FROM snapshot_quotes q
+            JOIN market_snapshots s ON s.snapshot_id=q.snapshot_id
+            WHERE q.symbol IN ({placeholders})
+              AND q.price IS NOT NULL
+              AND q.weight > 0
+              AND s.captured_at <= ?
+              AND s.snapshot_id IN (
+                  SELECT snapshot_id FROM market_snapshots
+                  WHERE captured_at <= ? ORDER BY captured_at DESC LIMIT ?
+              )
+            ORDER BY s.captured_at ASC
+        """
+        with self.session() as con:
+            rows = con.execute(sql, [*symbols, as_of_iso, as_of_iso, int(limit)]).fetchall()
+        return [dict(row) for row in rows]
+
+    def insert_validation_run(self, row: dict[str, Any]) -> None:
+        with self.transaction() as con:
+            con.execute(
+                """
+                INSERT INTO validation_runs(
+                    validation_id,created_at,status,model_version,config_hash,
+                    sessions,matured_forecasts,trades,payload_json
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    row["validation_id"], row["created_at"], row["status"],
+                    row["model_version"], row["config_hash"], row.get("sessions", 0),
+                    row.get("matured_forecasts", 0), row.get("trades", 0),
+                    self._json(row.get("payload", {})),
+                ),
+            )
+
+    def insert_replay_run(self, row: dict[str, Any]) -> None:
+        with self.transaction() as con:
+            con.execute(
+                """
+                INSERT INTO replay_runs(
+                    replay_id,created_at,start_at,end_at,samples,mismatches,status,payload_json
+                ) VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (
+                    row["replay_id"], row["created_at"], row.get("start_at"), row.get("end_at"),
+                    row.get("samples", 0), row.get("mismatches", 0), row["status"],
+                    self._json(row.get("payload", {})),
+                ),
+            )
 
     def pending_predictions(self, now_iso: str, grace_seconds: int = 0) -> list[dict[str, Any]]:
         with self.session() as con:

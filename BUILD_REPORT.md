@@ -1,153 +1,113 @@
-# Build Verification Report
+# Alpha-SPY 3.0.0 Build & Readiness Report
 
-## Release
+Generated: 2026-08-10
+Release posture: **real-time production market data + Tradier sandbox paper execution only**
+Production-money posture: **locked; manual review and separate evidence-bound authorization required**
 
-- Product: Alpha-SPY
-- Version: 2.0.0
-- Build date: 2026-08-06
-- Target platform: Ubuntu 24.04 LTS, single VPS
-- Python requirement: 3.11 or newer
-- Installation posture: sandbox, paper mode, order submission disabled, production sentinel absent
+## Release objective
 
-## Included system
+Alpha-SPY 3.0.0 is the single consolidated paper-validation release. It is designed to get the system as close as practical to a production trading environment without risking real capital. The decision engine consumes real-time production market observations, sends broker orders only to the sandbox virtual account during proof, records broker lifecycle/fills, and accumulates immutable evidence for a later manual live review.
 
-This release contains the complete source tree, bundled application wheel, Ubuntu installer, systemd service topology, secure browser GUI, local decision API, market and option-data collection, constituent feature and forecasting engine, defined-risk strategy generator, risk controller, guarded execution workflow, settlement monitor, immutable T+15 confirmation tape, model-governance Dojo, Google Drive backup tooling, research framework, tests, operating documentation, upgrade and rollback procedures, and a standalone GUI preview.
+## Implemented architecture
 
-The installer performs a fresh installation. It rebuilds `/opt/alpha-spy` and regenerates `/etc/alpha-spy`, leaves trading data under `/var/lib/alpha-spy` in place, and touches only Alpha-SPY-owned paths, units and the `alphaspy` service account.
+- One authoritative Python namespace: `alpha_spy`.
+- Tradier production REST/WebSocket market-data credential isolated from the sandbox execution credential.
+- Synchronized one-minute captured tape built from continuous production streaming.
+- SPY + point-in-time constituent universe plus QQQ/IWM, sectors, credit, dollar, Treasury-ETF rate proxies and VIX-family context.
+- Explicit ES/NQ/RTY cash proxies; direct futures are never fabricated.
+- Stream trade/quote microstructure: aggressor proxy, spreads, large-trade activity and quote/trade counts.
+- Internal SPY-constituent TICK/TRIN-like breadth proxies and replayable SPY session VWAP/value-area/opening-range profile proxy.
+- SPY option-chain activity proxy, IV/skew surface, OI/gamma dealer-gamma proxy and constituent IV context.
+- Versioned external event-calendar adapter with stale/missing/out-of-window fail-closed behavior.
+- Hierarchical micro/intraday/swing/structural regime model.
+- Full forecasting stack: 5m, 15m, 30m, 60m, 120m, EOD, 1D and 5D.
+- Walk-forward standardized Ridge champion signal. Fixed coefficients are cold-start only and are not sufficient for promotion.
+- 15m/30m formal-anchor nonlinear HistGradientBoosting shadow challenger with zero trading/risk/promotion authority.
+- Constituent Student-t physical P distribution with dynamic covariance.
+- Synthetic risk-neutral Q distribution, IV smile/correlation-risk-premium context and full frozen P/Q quantile grids.
+- Path outputs: continuation/reversal, first-touch ordering, squeeze/liquidation, MFE/MAE and terminal quantiles.
+- Horizon-correct 0DTE option repricing preserving remaining tenor and forecast IV change.
+- P/Q/cost/uncertainty-adjusted strategy ranking with `NO_TRADE` as a first-class outcome.
+- 5-minute entry grid; one-minute managed-position monitoring.
+- Strategy-aware stops, profit targets, trailing exits, thesis/IV invalidation, time/horizon exits, late-session reduction and 15:55 ET forced flat.
+- Broker account validity, buying-power and reconciliation hard vetoes.
+- Partial-fill adoption, cancel/replace handling, direct held-leg mark fallback, broker-authoritative quantities and actual-fill/fee settlement.
+- Deterministic captured-tape as-of replay including full P/Q distribution-shape verification.
+- Nightly objective promotion evaluator and dashboard visibility for failed gates.
+- Existing confirmation tape, Dojo, research tree, dashboard, backup and systemd service architecture retained.
 
-## Automated verification completed
+## Paper-validation policy
 
-### Source tests
+The shipped policy requires all gates to pass. Key minimums include:
 
-```text
-27 passed
-```
+- 60 paper sessions.
+- 5,000 matured forecasts.
+- 750 non-overlapping formal-anchor observations at both 15m and 30m.
+- 60 closed sandbox trades.
+- >=99% verified production-stream/input coverage.
+- >=90% P/Q-ready forecasts.
+- >=90% trained Ridge signal fraction on 15m and 30m formal evidence.
+- 15m direction >=53% and 95% Wilson lower bound >=50%.
+- 30m direction >=52.5% and 95% Wilson lower bound >=50%.
+- Brier ceilings and Brier-skill gates.
+- 72%-88% primary interval coverage.
+- Net P&L >=0, profit factor >=1.15 and one-sided 95% expectancy lower bound >=0.
+- Last 20 trades net >=0 and profit factor >=1.0.
+- Max drawdown <=$600.
+- Doubled-modeled-friction P&L >=0.
+- Sandbox broker fill fraction >=95%; mean fill slippage <=$12.
+- Zero unresolved reconciliation errors.
+- No realized loss >1.10x modeled max loss.
+- At least three tested regime buckets covering >=75% of trades, with nonnegative expectancy in sufficiently sampled buckets.
+- Deterministic replay of the current decision fingerprint with zero mismatches.
 
-The suite tests cover runtime configuration, SQLite schemas, demo market ingestion, feature generation, immutable prediction creation, defined-risk candidate construction, Tradier quote normalization, timestamps, butterflies, fail-closed live execution, confirmation maturity, post-target snapshot selection, counterfactual outcomes, Dojo reporting, pricing, covariance, lead/lag, attribution, scanner behavior, empirical policies, strategy tournaments, and professional exits.
+Passing yields only `ELIGIBLE_FOR_MANUAL_LIVE_REVIEW`. It never automatically enables real-money trading.
 
-### Static validation
+## Verification performed
 
-- Python compilation: passed for `src/`, `tests/`, and `examples/`
-- Dashboard JavaScript syntax: passed with `node --check`
-- Installer and utility shell syntax: passed with `bash -n`
-- Systemd units and timers: passed with `systemd-analyze verify`
+### Source/runtime tests
 
-### Built wheel
+`python -m pytest -o addopts='' -q`
 
-```text
-alpha_spy-2.0.0-py3-none-any.whl
-SHA-256: adfed16c5025ed744fd1884711df35d2a4dade5783b52104b3399b972d2fd50b
-```
+Result: **243 passed**.
 
-The final wheel was installed into an isolated target and exercised independently of the source tree.
+### Static/package checks
 
-### Installed-wheel smoke test
+- `python -m compileall -q src tests examples` — PASS.
+- `bash -n install.sh scripts/*.sh scripts/alpha-spy-backup` — PASS.
+- `node --check src/alpha_spy/dashboard/static/app.js` — PASS.
+- `scripts/verify_units.sh` — PASS; **15 systemd units verified**.
+- `scripts/check_legacy_identifiers.sh` — PASS.
+- `git diff --check` — PASS.
+- Ruff: the execution environment's package index does not expose a Ruff distribution, so Ruff could not be reproduced locally. The repository retains the pinned Ruff configuration and GitHub CI is expected to run it.
 
-The wheel smoke test verified:
+### Wheel build
 
-- Configuration load: passed
-- Database initialization and `PRAGMA quick_check`: `ok`
-- Demo market cycle: passed
-- Prediction/decision cycle: passed
-- Dashboard API startup: passed
-- Decision API startup: passed
-- Dashboard health endpoint: passed
-- Decision health endpoint: passed
-- Dashboard state without token: HTTP 401
-- Dashboard state with view token: HTTP 200
-- Administrative command with view token: HTTP 403
-- Administrative command with admin token: HTTP 200
-- GUI command queue to engine: completed
-- `PAUSE_NEW_ENTRIES` control applied before decision processing: passed
-- Runtime version: 2.0.0
-- Demo audit health: GREEN
-- Strategy matrix populated: six eligible or shadow rows in the smoke state
+Built successfully with no dependency resolution:
 
-### Backup smoke test
+`python -m pip wheel . --no-deps --no-build-isolation`
 
-The Google Drive backup program was exercised with a temporary live SQLite database and a controlled remote adapter. The test verified:
+Artifact: `alpha_spy-3.0.0-py3-none-any.whl`
+SHA-256: `4399b6fbfea929b9705638a69e3b7cdfed283d8d74455aca5a3f2a0811c64838`
 
-- Rclone preflight
-- Database detection and temporary-space calculation
-- SQLite Online Backup API snapshot
-- Snapshot progress reporting
-- `PRAGMA quick_check=ok`
-- Zstandard compression
-- Dated database upload path
-- `latest` database copy
-- Incremental non-database raw-file copy
-- Database exclusion from raw-data copy
-- Completion manifest with `result=SUCCESS`
-- Lock and cleanup behavior
+### Installed-wheel smoke
 
-### GUI verification
+The built wheel was installed into a clean target directory with `--no-deps` and exercised using the runner's installed runtime dependencies. The smoke created a fresh journal, loaded the local universe, created a deterministic demo snapshot, ran the hardened engine, emitted a fail-closed `NO_TRADE` decision and built dashboard state.
 
-- Standalone HTML preview generated from the final GUI source
-- Chromium headless render: passed
-- Browser console errors: none
-- Page errors: none
-- Screenshot dimensions: 1920 × 1080
-- Command Center screenshot SHA-256: `dd380d25c9f6b3bfbbb4859d07fd9d041fe68bf40711e529f849f626ad5118fc`
-- Standalone preview SHA-256: `a9e609f18f960bab7cbbee20191d899a2c671f2f39afe7eee82a25c8d1159897`
+Result: **INSTALLED_WHEEL_SMOKE_OK**.
 
-## Installed service topology
+A fully isolated venv bootstrap was not reproducible in this runner because its package index could not supply all bootstrap tooling; this is an infrastructure limitation rather than an Alpha-SPY source failure. GitHub CI remains the authoritative isolated dependency/build check after upload.
 
-The installer deploys and manages:
+## Data-source boundaries
 
-- `alpha-spy-market.service`
-- `alpha-spy-engine.service`
-- `alpha-spy-confirmation.service`
-- `alpha-spy-settlement.service`
-- `alpha-spy-decision.service`
-- `alpha-spy-dashboard.service`
-- `alpha-spy-dojo.service`
-- `alpha-spy-dojo.timer`
-- `alpha-spy-backup.service`
-- `alpha-spy-backup.timer`
-- `alpha-spy.target`
+Alpha-SPY explicitly does **not** claim data that the configured Tradier interface does not provide. Direct ES/NQ/RTY futures, exchange L2 depth/queue/cancellation messages, official NYSE TICK/TRIN, direct Treasury yields, and institutional sweep/complex-order classification remain unavailable unless a dedicated authoritative feed is added. Their currently available information classes are represented by clearly labelled proxies where possible and by missing/uncertainty state otherwise.
 
-The dashboard and decision API bind only to `127.0.0.1`. The intended access path is an SSH tunnel. View, administrator, and ingestion credentials are separate.
+This matters for later live review: sandbox execution and real-time market observation can validate model logic, timing, broker lifecycle, risk controls and paper expectancy, but cannot fully reproduce real-money queue priority, market impact or adverse selection. The promotion gates reduce this uncertainty; they do not make it disappear.
 
-## Safety posture
+## Secret handling
 
-The supplied configuration is fail-closed:
+No production or sandbox API key/account value is stored in the repository. `config/secrets.env.example` contains only empty placeholders. Runtime secrets belong in `/etc/alpha-spy/secrets.env` with restricted permissions.
 
-- Tradier sandbox environment
-- Trading disabled
-- Paper mode enabled
-- Order submission disabled
-- Broker preview required
-- One contract maximum
-- One new trade per day maximum
-- $100 maximum modeled trade risk
-- $200 managed daily-loss limit
-- One managed position at a time
-- Data-integrity and stale-data entry blocks
-- Time-gated entries
-- Forced-flat target at 15:55 Eastern
-- Separate production sentinel required
+## Final readiness statement
 
-Production submission cannot be enabled only through the GUI. It requires an explicit configuration change, production account credentials, paper mode removal, order submission enablement, and `/etc/alpha-spy/PRODUCTION_UNLOCKED`.
-
-## Deliberate limitations and unverified items
-
-This build was not installed on the user's actual VPS from this environment. It was not connected to the user's real Tradier account, and no real or sandbox brokerage order was submitted. Consequently, account-specific permissions, live quote entitlements, broker order-state transitions, fill behavior, cancel/replace behavior, and actual forced-flat behavior remain to be verified on the target account before any production unlock.
-
-The installer and service units were validated statically and through local process/API smoke tests, not by rebooting the user's VPS. The Google Drive backup logic was fully exercised against a controlled adapter; the user's already-authorized `gdrive:` remote must still be checked by the installer on the VPS. The installer enables the 5:00 PM Eastern backup timer only when that root-owned remote responds successfully.
-
-The constituent universe uses an iShares IVV holdings source with a bundled fallback. Availability, format changes, and market-data coverage remain external dependencies. The system records data integrity and blocks trading when configured coverage requirements are not satisfied.
-
-## Installation command
-
-```bash
-cd /root
-tar -xzf alpha-spy-v2.0.0.tar.gz
-cd alpha-spy-v2.0.0
-sudo bash install.sh
-```
-
-After installation, credentials and tunnel instructions are written to:
-
-```text
-/root/alpha-spy-credentials.txt
-```
+Alpha-SPY 3.0.0 is ready for **real-time paper-validation deployment**, not automatic real-money deployment. The next work after installation is evidence collection, not architectural feature development. Do not alter the champion decision/risk configuration during a proof window unless intentionally restarting the decision fingerprint and validation clock.

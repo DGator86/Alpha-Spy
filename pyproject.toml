@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpha-spy"
-version = "2.0.0"
+version = "3.0.0"
 description = "Complete constituent-driven SPY options research, execution, audit, confirmation, and dashboard suite"
 readme = "README.md"
 requires-python = ">=3.11"

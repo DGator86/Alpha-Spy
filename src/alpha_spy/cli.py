@@ -12,9 +12,16 @@ import yaml
 from . import __version__
 from .config import SuiteConfig, load_config
 from .db import Journal
-from .services import ConfirmationService, DojoService, EngineService, MarketService, SettlementService
+from .event_calendar import refresh_event_calendar
+from .events import event_state_at
+from .hardening import HardenedEngineService, HardenedSettlementService
+from .replay import ReplayVerifier
+from .services import ConfirmationService, DojoService
 from .state import build_dashboard_state
+from .streaming_market import StreamingMarketService
+from .timeutil import utc_now
 from .universe import UniverseProvider
+from .validation import PromotionEvaluator
 
 
 def parser() -> argparse.ArgumentParser:
@@ -45,10 +52,23 @@ def parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor")
     sub.add_parser("state")
+    event = sub.add_parser("set-event-state")
+    event.add_argument(
+        "state",
+        choices=["ordinary", "earnings_heavy", "macro_announcement", "rebalance", "unknown"],
+    )
+    event_refresh = sub.add_parser("event-calendar-refresh")
+    event_refresh.add_argument("--source", default=None)
+    replay = sub.add_parser("replay-verify")
+    replay.add_argument("--samples", type=int, default=None)
+    validate = sub.add_parser("validate-promotion")
+    validate.add_argument("--skip-replay", action="store_true")
+    validate.add_argument("--replay-samples", type=int, default=None)
+    sub.add_parser("promotion-report")
     refresh = sub.add_parser("universe-refresh")
     refresh.add_argument("--force", action="store_true")
     once = sub.add_parser("run-once")
-    once.add_argument("service", choices=["market", "engine", "confirmation", "settlement", "dojo"])
+    once.add_argument("service", choices=["market", "engine", "confirmation", "settlement", "dojo", "validation"])
     init = sub.add_parser("init-config")
     init.add_argument("path", nargs="?", default="./config.yaml")
     init.add_argument("--force", action="store_true")
@@ -87,6 +107,9 @@ def _configure_dashboard_env(config: SuiteConfig) -> None:
 
 
 def doctor(config: SuiteConfig, journal: Journal) -> int:
+    approval_ok, approval_reason = config.production_approval_status()
+    validation = journal.latest_validation_run() or {}
+    current_event = event_state_at(config, utc_now())
     checks = {
         "version": __version__,
         "config": "ok",
@@ -95,12 +118,31 @@ def doctor(config: SuiteConfig, journal: Journal) -> int:
         "database_quick_check": journal.integrity_check(),
         "dashboard_database": str(config.paths.dashboard_database),
         "tradier_environment": config.tradier.environment,
-        "tradier_token_configured": bool(config.tradier.access_token.get_secret_value()),
-        "tradier_account_configured": bool(config.tradier.account_id),
+        "tradier_execution_environment": config.tradier.environment,
+        "tradier_execution_token_configured": bool(config.tradier.access_token.get_secret_value()),
+        "tradier_execution_account_configured": bool(config.tradier.account_id),
+        "tradier_market_environment": config.tradier.market_environment,
+        "tradier_market_token_configured": bool(config.tradier.market_access_token.get_secret_value()),
+        "tradier_market_stream_enabled": config.tradier.stream_enabled,
         "trading_enabled": config.trading.enabled,
         "submit_orders": config.trading.submit_orders,
         "paper_mode": config.trading.paper_mode,
+        "execution_mode": (
+            "local_paper"
+            if not config.trading.submit_orders
+            else "tradier_sandbox_paper"
+            if config.tradier.environment == "sandbox"
+            else "tradier_production_live"
+        ),
         "production_unlocked": config.production_is_unlocked(),
+        "production_approval": approval_ok,
+        "production_approval_reason": approval_reason,
+        "production_config_fingerprint": config.production_fingerprint(),
+        "paper_validation_status": validation.get("status", "NOT_RUN"),
+        "paper_validation_report": str(config.paths.promotion_report),
+        "event_calendar_state": current_event.state,
+        "event_calendar_source": current_event.source,
+        "event_calendar_blocked": current_event.blocked,
         "view_token_configured": bool(config.dashboard.view_token.get_secret_value()),
         "admin_token_configured": bool(config.dashboard.admin_token.get_secret_value()),
         "ingest_token_configured": bool(config.dashboard.ingest_token.get_secret_value()),
@@ -119,10 +161,6 @@ def doctor(config: SuiteConfig, journal: Journal) -> int:
         checks["universe_error"] = str(exc)
     checks["universe_meets_minimum"] = universe_ok
 
-    # Report the conditions that actually gate trading. Reporting "ok" while
-    # the universe sits below the configured minimum -- which blocks every
-    # entry when block_on_incomplete_universe is set -- tells an operator the
-    # opposite of what the risk controller will do.
     warnings: list[str] = []
     if not universe_ok:
         warnings.append(
@@ -132,10 +170,27 @@ def doctor(config: SuiteConfig, journal: Journal) -> int:
         )
         if config.risk.block_on_incomplete_universe:
             warnings.append("entries are blocked while universe coverage is incomplete")
+    if (
+        config.trading.enabled
+        and config.tradier.stream_enabled
+        and not config.tradier.market_access_token.get_secret_value()
+    ):
+        warnings.append("production market stream is enabled but TRADIER_MARKET_ACCESS_TOKEN is missing")
+    if config.tradier.environment == "production" and config.trading.submit_orders and not approval_ok:
+        warnings.append(f"production broker submission is locked: {approval_reason}")
+    if config.trading.submit_orders and config.tradier.environment == "sandbox" and not config.trading.paper_mode:
+        warnings.append("sandbox submission is configured but paper_mode is false")
+    if (
+        config.trading.enabled
+        and config.context.event_calendar_enabled
+        and config.context.event_calendar_required
+        and current_event.source != "calendar"
+    ):
+        warnings.append(f"event calendar blocks entries: {current_event.source}")
+    if validation and validation.get("status") != "ELIGIBLE_FOR_MANUAL_LIVE_REVIEW":
+        warnings.append("paper validation has not passed all promotion gates")
     checks["warnings"] = warnings
 
-    # Only a broken database is a hard failure: a thin universe is recoverable
-    # and fails closed on its own, so it must not abort an installation.
     failed = checks["database_quick_check"] != "ok"
     checks["doctor"] = "failed" if failed else ("degraded" if warnings else "ok")
     print(json.dumps(checks, indent=2, default=str))
@@ -148,6 +203,7 @@ def init_config(path: Path, force: bool) -> None:
     config = SuiteConfig()
     raw = config.model_dump(mode="json")
     raw["tradier"]["access_token"] = ""
+    raw["tradier"]["market_access_token"] = ""
     raw["dashboard"]["view_token"] = secrets.token_urlsafe(32)
     raw["dashboard"]["admin_token"] = secrets.token_urlsafe(32)
     raw["dashboard"]["ingest_token"] = secrets.token_urlsafe(32)
@@ -165,19 +221,20 @@ def main() -> None:
     journal = Journal(config.paths.database)
 
     if args.command == "market":
-        MarketService(config, journal).run_forever()
+        StreamingMarketService(config, journal).run_forever()
     elif args.command == "engine":
-        EngineService(config, journal).run_forever()
+        HardenedEngineService(config, journal).run_forever()
     elif args.command == "confirmation":
         ConfirmationService(config, journal).run_forever()
     elif args.command == "settlement":
-        SettlementService(config, journal).run_forever()
+        HardenedSettlementService(config, journal).run_forever()
     elif args.command == "decision-service":
         os.environ["ALPHA_SPY_CONFIG"] = args.config
         uvicorn.run("alpha_spy.decision_api:app", host=args.host, port=args.port, log_level="info")
     elif args.command == "dashboard-api":
         _configure_dashboard_env(config)
         from alpha_spy.dashboard.config import get_settings
+
         get_settings.cache_clear()
         uvicorn.run(
             "alpha_spy.dashboard.app:app",
@@ -196,16 +253,37 @@ def main() -> None:
         raise SystemExit(doctor(config, journal))
     elif args.command == "state":
         print(json.dumps(build_dashboard_state(config, journal), indent=2, default=str))
+    elif args.command == "set-event-state":
+        journal.set_control("event_state", args.state)
+        print(json.dumps({"event_state": args.state, "source": "operator_control"}, indent=2))
+    elif args.command == "event-calendar-refresh":
+        print(json.dumps(refresh_event_calendar(config, args.source), indent=2, default=str))
+    elif args.command == "replay-verify":
+        result = ReplayVerifier(config, journal).run(args.samples)
+        print(json.dumps(result, indent=2, default=str))
+        raise SystemExit(0 if result.get("status") == "PASSED" else 2)
+    elif args.command == "validate-promotion":
+        result = PromotionEvaluator(config, journal).run(
+            run_replay=not args.skip_replay,
+            replay_samples=args.replay_samples,
+        )
+        print(json.dumps(result, indent=2, default=str))
+        raise SystemExit(0 if result.get("status") == "ELIGIBLE_FOR_MANUAL_LIVE_REVIEW" else 3)
+    elif args.command == "promotion-report":
+        if not config.paths.promotion_report.is_file():
+            raise SystemExit(f"Promotion report not found: {config.paths.promotion_report}")
+        print(config.paths.promotion_report.read_text(encoding="utf-8"), end="")
     elif args.command == "universe-refresh":
         holdings = UniverseProvider(config).refresh(force=args.force)
         print(json.dumps({"count": len(holdings), "weight": sum(x.weight for x in holdings)}, indent=2))
     elif args.command == "run-once":
         services = {
-            "market": lambda: MarketService(config, journal).run_once(),
-            "engine": lambda: EngineService(config, journal).run_once(),
+            "market": lambda: StreamingMarketService(config, journal).run_once(),
+            "engine": lambda: HardenedEngineService(config, journal).run_once(),
             "confirmation": lambda: ConfirmationService(config, journal).run_once(),
-            "settlement": lambda: SettlementService(config, journal).run_once(),
+            "settlement": lambda: HardenedSettlementService(config, journal).run_once(),
             "dojo": lambda: str(DojoService(config, journal).run_once()),
+            "validation": lambda: json.dumps(PromotionEvaluator(config, journal).run(), default=str),
         }
         print(services[args.service]())
 

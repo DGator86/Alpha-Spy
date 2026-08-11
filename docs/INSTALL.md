@@ -24,8 +24,8 @@ The installer performs a fresh installation. It rebuilds `/opt/alpha-spy` and re
 ## Installation
 
 ```bash
-tar -xzf alpha-spy-v2.0.0.tar.gz
-cd alpha-spy-v2.0.0
+tar -xzf alpha-spy-v3.0.0.tar.gz
+cd alpha-spy-v3.0.0
 sudo bash install.sh
 ```
 
@@ -57,6 +57,8 @@ alpha-spy-settlement.service
 alpha-spy-decision.service
 alpha-spy-dashboard.service
 alpha-spy-dojo.timer
+alpha-spy-validation.timer
+alpha-spy-event-calendar.timer
 alpha-spy-backup.timer
 alpha-spy.target
 ```
@@ -81,10 +83,10 @@ The dashboard is `http://127.0.0.1:8788` and the local decision API is `http://1
 
 ## Rollback
 
-Stop v2:
+Stop Alpha-SPY:
 
 ```bash
-systemctl disable --now alpha-spy.target alpha-spy-dojo.timer alpha-spy-backup.timer
+systemctl disable --now alpha-spy.target alpha-spy-dojo.timer alpha-spy-validation.timer alpha-spy-event-calendar.timer alpha-spy-backup.timer
 ```
 
 Each install rebuilds `/opt/alpha-spy` from the release archive; see [UPGRADE.md](UPGRADE.md) for rollback.

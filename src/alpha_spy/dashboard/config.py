@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     tradier_stream_enabled: bool = False
 
     engine_name: str = "Alpha-SPY"
-    engine_version: str = "2.0.0"
+    engine_version: str = "3.0.0"
 
     websocket_interval_seconds: float = 1.0
     max_prediction_rows: int = 3000

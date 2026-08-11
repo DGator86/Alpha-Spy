@@ -774,8 +774,8 @@ class ConfirmationService:
             )
             self.journal.insert_revision_check(check)
             return check
-        if not self.config.tradier.access_token.get_secret_value():
-            check["payload"] = {"reason": "tradier_not_configured"}
+        if not self.config.tradier.market_access_token.get_secret_value():
+            check["payload"] = {"reason": "tradier_market_data_not_configured"}
             self.journal.insert_revision_check(check)
             return check
 
@@ -784,7 +784,7 @@ class ConfirmationService:
         start = (local - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
         end = (local + timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M")
         try:
-            with TradierClient(self.config) as client:
+            with TradierClient(self.config, purpose="market") as client:
                 bars = client.timesales(
                     "SPY", interval="1min", start=start, end=end, session_filter="all"
                 )
@@ -894,9 +894,16 @@ class ConfirmationService:
         )
         pending = self.journal.pending_predictions(maturity_cutoff)
         for prediction in pending:
+            horizon_minutes = int(prediction.get("horizon_minutes") or 15)
+            tolerance = max(120, self.config.market.poll_interval_seconds * 2)
+            if horizon_minutes >= 390:
+                # Daily/research horizons can span a market holiday or a brief collector restart.
+                # The actual delta is still persisted and downgraded below; this only prevents
+                # an otherwise valid long-horizon forecast from remaining pending forever.
+                tolerance = max(tolerance, 36 * 60 * 60)
             realized = self.journal.snapshot_at_or_after(
                 prediction["target_at"],
-                tolerance_seconds=max(120, self.config.market.poll_interval_seconds * 2),
+                tolerance_seconds=tolerance,
             )
             if not realized or not realized.get("spy_price"):
                 continue
