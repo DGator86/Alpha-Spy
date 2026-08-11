@@ -6,7 +6,7 @@
 #   alpha-spy-v<version>.zip     (+ .sha256)
 #   RELEASE_MANIFEST.sha256
 #
-# The archives contain the same layout the v2.0.0 release shipped: source
+# The archives contain the explicit supported release layout: source
 # tree, tests, examples, docs, config, systemd units, operator scripts, the
 # GUI preview, the bundled wheel under dist/, and a manifest of every file.
 # scripts/install_vps.sh installs straight out of an extracted archive.

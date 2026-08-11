@@ -20,6 +20,8 @@ ALPHA_SPY_UNITS=(
   alpha-spy-decision
   alpha-spy-dashboard
   alpha-spy-dojo
+  alpha-spy-validation
+  alpha-spy-event-calendar
   alpha-spy-backup
 )
 
@@ -36,7 +38,7 @@ systemctl stop alpha-spy.target 2>/dev/null || true
 for unit in "${ALPHA_SPY_UNITS[@]}"; do
   systemctl stop "$unit.service" 2>/dev/null || true
 done
-for timer in alpha-spy-dojo.timer alpha-spy-backup.timer; do
+for timer in alpha-spy-dojo.timer alpha-spy-validation.timer alpha-spy-event-calendar.timer alpha-spy-backup.timer; do
   systemctl stop "$timer" 2>/dev/null || true
 done
 pkill -TERM -f '/opt/alpha-spy/venv/bin/alpha-spy' 2>/dev/null || true
@@ -51,7 +53,7 @@ echo "[4/9] Creating the restricted service account and data roots"
 id alphaspy >/dev/null 2>&1 || \
   useradd --system --home /var/lib/alpha-spy --shell /usr/sbin/nologin alphaspy
 mkdir -p /etc/alpha-spy \
-  /var/lib/alpha-spy/{journal,dashboard,reference,models,reports,market,candidates,audit,positions,backups} \
+  /var/lib/alpha-spy/{journal,dashboard,reference,models,reports,market,candidates,audit,replay,validation,positions,backups} \
   /var/lib/alpha-spy/models/challengers \
   /var/lib/alpha-spy/reports/dojo \
   /var/lib/alpha-spy/dojo \
@@ -84,9 +86,16 @@ import shlex
 import sys
 
 values = {
-    "TRADIER_ACCESS_TOKEN": "",
-    "TRADIER_ACCOUNT_ID": "",
-    "TRADIER_ENVIRONMENT": "sandbox",
+    "TRADIER_MARKET_ACCESS_TOKEN": "",
+    "TRADIER_STREAM_ENABLED": "true",
+    "TRADIER_EXECUTION_ACCESS_TOKEN": "",
+    "TRADIER_EXECUTION_ACCOUNT_ID": "",
+    "TRADIER_EXECUTION_ENVIRONMENT": "sandbox",
+    "TRADIER_PRODUCTION_EXECUTION_ACCESS_TOKEN": "",
+    "TRADIER_PRODUCTION_EXECUTION_ACCOUNT_ID": "",
+    "ALPHA_SPY_TRADING_ENABLED": "false",
+    "ALPHA_SPY_SUBMIT_ORDERS": "false",
+    "ALPHA_SPY_PAPER_MODE": "true",
     "ALPHA_SPY_VIEW_TOKEN": sys.argv[1],
     "ALPHA_SPY_ADMIN_TOKEN": sys.argv[2],
     "ALPHA_SPY_INGEST_TOKEN": sys.argv[3],
@@ -118,7 +127,7 @@ cp "$ROOT_DIR"/systemd/* /etc/systemd/system/
 cp "$ROOT_DIR/scripts/alpha-spy-backup" /usr/local/sbin/alpha-spy-backup
 chmod 700 /usr/local/sbin/alpha-spy-backup
 systemctl daemon-reload
-systemctl enable alpha-spy.target alpha-spy-dojo.timer
+systemctl enable alpha-spy.target alpha-spy-dojo.timer alpha-spy-validation.timer
 
 if rclone about gdrive: >/dev/null 2>&1; then
   systemctl enable alpha-spy-backup.timer
@@ -133,7 +142,7 @@ set -a; source /etc/alpha-spy/secrets.env; set +a
 
 echo "[9/9] Starting Alpha-SPY"
 systemctl enable --now alpha-spy.target
-systemctl enable --now alpha-spy-dojo.timer
+systemctl enable --now alpha-spy-dojo.timer alpha-spy-validation.timer
 [[ "$BACKUP_STATUS" == enabled ]] && systemctl enable --now alpha-spy-backup.timer || true
 sleep 8
 curl -fsS http://127.0.0.1:8787/health >/dev/null

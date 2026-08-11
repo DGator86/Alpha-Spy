@@ -64,8 +64,7 @@ engine cycle.
 
 ### Release archives
 
-`scripts/build_release.sh` stages an explicit file list — the same layout the
-v2.0.0 release shipped — and produces:
+`scripts/build_release.sh` stages an explicit file list — the explicit supported release layout — and produces:
 
 ```text
 dist/release/alpha-spy-v<version>.tar.gz  (+ .sha256)
@@ -134,8 +133,8 @@ Two narrower exemptions are configured rather than fixed:
 3. Tag and push:
 
    ```bash
-   git tag v2.1.0
-   git push origin v2.1.0
+   git tag v3.0.0
+   git push origin v3.0.0
    ```
 
 `.github/workflows/release.yml` then re-runs lint, tests, the release build,
@@ -149,9 +148,9 @@ an existing tag replaces the assets and rewrites the notes.
 Verify a published release before installing it:
 
 ```bash
-curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/alpha-spy-v2.1.0.tar.gz
-curl -fLO https://github.com/<owner>/<repo>/releases/download/v2.1.0/alpha-spy-v2.1.0.tar.gz.sha256
-sha256sum -c alpha-spy-v2.1.0.tar.gz.sha256
+curl -fLO https://github.com/<owner>/<repo>/releases/download/v3.0.0/alpha-spy-v3.0.0.tar.gz
+curl -fLO https://github.com/<owner>/<repo>/releases/download/v3.0.0/alpha-spy-v3.0.0.tar.gz.sha256
+sha256sum -c alpha-spy-v3.0.0.tar.gz.sha256
 ```
 
 ## Deploying to the VPS

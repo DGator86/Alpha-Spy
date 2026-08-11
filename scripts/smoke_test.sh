@@ -3,7 +3,7 @@
 #
 # Installs the wheel into a throwaway virtualenv, points the suite at a
 # temporary state root, and verifies the same behaviour BUILD_REPORT.md
-# records for the v2.0.0 release: configuration load, database integrity,
+# records for the current release: configuration load, database integrity,
 # a demo market cycle, a prediction/decision cycle, both API servers, and
 # the dashboard's view/admin token separation.
 #

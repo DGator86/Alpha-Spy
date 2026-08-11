@@ -7,6 +7,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+*.whl
 
 # Test and lint caches
 .pytest_cache/
@@ -22,7 +23,11 @@ htmlcov/
 reports/
 
 # Local operator state — never commit tokens or live configuration
+.env
+.env.*
+!.env.example
 secrets.env
+config/secrets.env
 *.sqlite
 *.sqlite3
 *.db

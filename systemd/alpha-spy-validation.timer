@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Alpha-SPY paper-validation after nightly governance
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 19:00:00 America/New_York
+Persistent=true
+AccuracySec=1m
+Unit=alpha-spy-validation.service
+
+[Install]
+WantedBy=timers.target

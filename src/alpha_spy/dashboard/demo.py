@@ -21,7 +21,7 @@ def base_state(now: datetime, tick: int = 0) -> dict[str, Any]:
     pnl = 42.0 + math.sin(phase * 1.4) * 17.0
     return {
         "timestamp": iso(now),
-        "engine": {"name": "Alpha-SPY", "version": "2.0.0", "environment": "SANDBOX", "mode": "PAPER"},
+        "engine": {"name": "Alpha-SPY", "version": "3.0.0", "environment": "SANDBOX", "mode": "PAPER"},
         "session": {"market_open": True, "exchange_time": now.astimezone().strftime("%H:%M:%S"), "entry_window": "OPEN", "forced_flat_time": "15:55 ET"},
         "health": {
             "state": "GREEN" if trust >= 0.75 else "YELLOW",
@@ -120,7 +120,7 @@ def base_state(now: datetime, tick: int = 0) -> dict[str, Any]:
             {"strategy": "Iron Condor", "regime": "Stable range / IV rich", "status": "DISABLED", "score": 0.34, "expectancy": -4.6},
         ],
         "challengers": [
-            {"name": "Champion v2.0.0", "status": "LIVE", "calibration": 0.89, "expectancy": 16.8, "tail_loss": 48.2, "sessions": 24},
+            {"name": "Champion v3.0.0", "status": "LIVE", "calibration": 0.89, "expectancy": 16.8, "tail_loss": 48.2, "sessions": 24},
             {"name": "Challenger correlation-v2", "status": "SHADOW", "calibration": 0.91, "expectancy": 18.1, "tail_loss": 46.9, "sessions": 11},
             {"name": "Challenger timing-v1", "status": "SHADOW", "calibration": 0.87, "expectancy": 17.4, "tail_loss": 51.3, "sessions": 7},
         ],
@@ -175,7 +175,7 @@ def seed_history(repo: Repository, now: datetime | None = None) -> None:
             "actual_price": actual,
             "direction_correct": (pred >= spot) == (actual >= spot),
             "integrity": "VERIFIED" if i % 19 else "MINOR_REVISION",
-            "model_version": "2.0.0-demo",
+            "model_version": "3.0.0-demo",
             "payload": {"actual_high": max(spot, actual) + abs(rng.gauss(0, .12)), "actual_low": min(spot, actual) - abs(rng.gauss(0, .12))},
         }
         repo.upsert_prediction(record)

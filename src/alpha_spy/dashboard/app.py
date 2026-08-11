@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
         await runtime.service.stop()
 
 
-app = FastAPI(title="SPY Alpha Command Center", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="SPY Alpha Command Center", version="3.0.0", lifespan=lifespan)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -87,7 +87,7 @@ async def auth_mode() -> dict:
 
 @app.get("/api/v1/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "2.0.0", "mode": runtime.settings.dashboard_mode, "timestamp": utc_now_iso()}
+    return {"status": "ok", "version": "3.0.0", "mode": runtime.settings.dashboard_mode, "timestamp": utc_now_iso()}
 
 
 @app.get("/api/v1/dashboard/state", dependencies=[Depends(view_guard)])

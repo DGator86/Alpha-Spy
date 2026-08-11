@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh Alpha-SPY versioned event-risk calendar
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=alphaspy
+Group=alphaspy
+EnvironmentFile=-/etc/alpha-spy/secrets.env
+ExecStart=/opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml event-calendar-refresh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/etc/alpha-spy /var/lib/alpha-spy /var/log/alpha-spy
+UMask=0077

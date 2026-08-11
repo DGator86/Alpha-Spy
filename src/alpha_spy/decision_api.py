@@ -14,7 +14,7 @@ from .timeutil import utc_iso
 CONFIG_PATH = os.getenv("ALPHA_SPY_CONFIG", "/etc/alpha-spy/config.yaml")
 config = load_config(CONFIG_PATH)
 journal = Journal(config.paths.database)
-app = FastAPI(title="Alpha-SPY Decision Service", version="2.0.0")
+app = FastAPI(title="Alpha-SPY Decision Service", version="3.0.0")
 
 
 def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:
@@ -32,7 +32,7 @@ def _authorize(authorization: Annotated[str | None, Header()] = None) -> None:
 def health() -> dict:
     return {
         "status": "ok",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "database": str(config.paths.database),
         "quick_check": journal.integrity_check(),
         "timestamp": utc_iso(),

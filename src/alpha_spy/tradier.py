@@ -4,7 +4,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -24,18 +24,24 @@ class RateState:
 
 
 class TradierClient:
-    def __init__(self, config: SuiteConfig):
+    def __init__(self, config: SuiteConfig, *, purpose: Literal["execution", "market"] = "execution"):
         self.config = config
-        self.token = config.tradier.access_token.get_secret_value()
-        self.account_id = config.tradier.account_id
-        self.base_url = config.tradier.base_url.rstrip("/")
+        self.purpose = purpose
+        if purpose == "market":
+            self.token = config.tradier.market_access_token.get_secret_value()
+            self.account_id = ""
+            self.base_url = config.tradier.market_base_url.rstrip("/")
+        else:
+            self.token = config.tradier.access_token.get_secret_value()
+            self.account_id = config.tradier.account_id
+            self.base_url = config.tradier.base_url.rstrip("/")
         self.rate_state = RateState()
         self.client = httpx.Client(
             timeout=config.tradier.timeout_seconds,
             headers={
                 "Authorization": f"Bearer {self.token}",
                 "Accept": "application/json",
-                "User-Agent": "alpha-spy/2.0.0",
+                "User-Agent": "alpha-spy/3.0.0",
             },
             follow_redirects=True,
         )
@@ -94,7 +100,7 @@ class TradierClient:
                 )
                 self._capture_rate(response)
                 if response.status_code == 429:
-                    wait = min(60.0, 2.0 ** attempt)
+                    wait = min(60.0, 2.0**attempt)
                     if self.rate_state.expiry_ms:
                         wait = max(wait, self.rate_state.expiry_ms / 1000 - time.time() + 0.25)
                     time.sleep(max(0.25, wait))
@@ -121,6 +127,15 @@ class TradierClient:
             return [value]
         return []
 
+    def create_market_session(self) -> str:
+        if self.purpose != "market":
+            raise TradierError("market streaming session requires purpose='market'")
+        payload = self.request("POST", "/markets/events/session")
+        session_id = payload.get("stream", {}).get("sessionid") or payload.get("sessionid")
+        if not session_id:
+            raise TradierError("Tradier did not return a market streaming session id")
+        return str(session_id)
+
     def profile(self) -> dict[str, Any]:
         return self.request("GET", "/user/profile")
 
@@ -135,14 +150,22 @@ class TradierClient:
         payload = self.request("GET", f"/accounts/{self.account_id}/positions")
         return self._as_list(payload.get("positions", {}).get("position") if payload.get("positions") else None)
 
-    def orders(self) -> list[dict[str, Any]]:
+    def orders(self, *, include_tags: bool = True, limit: int = 1000) -> list[dict[str, Any]]:
         if not self.account_id:
             return []
-        payload = self.request("GET", f"/accounts/{self.account_id}/orders")
+        payload = self.request(
+            "GET",
+            f"/accounts/{self.account_id}/orders",
+            params={"includeTags": str(bool(include_tags)).lower(), "limit": max(25, int(limit))},
+        )
         return self._as_list(payload.get("orders", {}).get("order") if payload.get("orders") else None)
 
     def order(self, order_id: str | int) -> dict[str, Any]:
-        payload = self.request("GET", f"/accounts/{self.account_id}/orders/{order_id}")
+        payload = self.request(
+            "GET",
+            f"/accounts/{self.account_id}/orders/{order_id}",
+            params={"includeTags": "true"},
+        )
         return payload.get("order", payload)
 
     def clock(self) -> dict[str, Any]:
@@ -226,9 +249,17 @@ class TradierClient:
         result = self.request("POST", f"/accounts/{self.account_id}/orders", data=body)
         return result.get("order", result)
 
-    def change_order(self, order_id: str | int, *, order_type: str, duration: str, price: float) -> dict[str, Any]:
+    def change_order(
+        self, order_id: str | int, *, order_type: str, duration: str, price: float
+    ) -> dict[str, Any]:
+        if order_type not in {"market", "limit", "stop", "stop_limit"}:
+            raise TradierError(
+                f"Tradier change-order endpoint does not accept type={order_type!r}; cancel/replace is required"
+            )
         payload = {"type": order_type, "duration": duration, "price": f"{price:.2f}"}
-        result = self.request("PUT", f"/accounts/{self.account_id}/orders/{order_id}", data=payload)
+        result = self.request(
+            "PUT", f"/accounts/{self.account_id}/orders/{order_id}", data=payload
+        )
         return result.get("order", result)
 
     def cancel_order(self, order_id: str | int) -> dict[str, Any]:
@@ -244,7 +275,6 @@ def normalize_quote(raw: dict[str, Any]) -> dict[str, Any]:
     price = last or ((bid + ask) / 2 if bid is not None and ask is not None else None) or close
     change_pct = _float(raw.get("change_percentage"))
     if change_pct is not None:
-        # Tradier reports this field in percentage points (for example -1.46 means -1.46%).
         change_pct /= 100.0
     if change_pct is None and price is not None and close not in (None, 0):
         change_pct = price / close - 1.0
@@ -289,6 +319,26 @@ def normalize_option(raw: dict[str, Any]) -> dict[str, Any]:
         "vega": _float(greeks.get("vega")),
         "payload": raw,
     }
+
+
+def order_quantities(order: dict[str, Any]) -> tuple[float, float]:
+    """Return executed and remaining order quantity using Tradier's canonical fields."""
+    executed = _float(order.get("exec_quantity")) or 0.0
+    remaining = _float(order.get("remaining_quantity"))
+    if remaining is None:
+        quantity = _float(order.get("quantity")) or 0.0
+        remaining = max(0.0, quantity - executed)
+    return float(executed), float(remaining)
+
+
+def preview_fees(preview: dict[str, Any] | None) -> float | None:
+    if not preview:
+        return None
+    commission = _float(preview.get("commission"))
+    fees = _float(preview.get("fees"))
+    if commission is None and fees is None:
+        return None
+    return max(0.0, float(commission or 0.0)) + max(0.0, float(fees or 0.0))
 
 
 def _float(value: Any) -> float | None:
