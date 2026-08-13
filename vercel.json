@@ -4,7 +4,7 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "echo 'install handled by buildCommand'",
   "framework": null,
-  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }],
+  "rewrites": [{ "source": "/((?!assets/|api/|ws/).*)", "destination": "/index.html" }],
   "headers": [
     {
       "source": "/assets/(.*)",

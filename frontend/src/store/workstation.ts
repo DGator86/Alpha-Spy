@@ -165,6 +165,15 @@ export const useWorkstation = create<WorkstationStore>((set, get) => ({
         set({ authError: 'Token rejected' })
         return false
       }
+      // A 2xx is not proof the dashboard answered. A CDN or proxy sitting in
+      // front of a misconfigured VITE_API_ORIGIN will happily return its own
+      // index.html with a 200, which would store a bogus token and then fail
+      // at the socket with no explanation.
+      const contentType = response.headers.get('content-type') ?? ''
+      if (!contentType.includes('json')) {
+        set({ authError: 'Not the dashboard API — check VITE_API_ORIGIN' })
+        return false
+      }
     } catch {
       set({ authError: 'Dashboard unreachable' })
       return false
