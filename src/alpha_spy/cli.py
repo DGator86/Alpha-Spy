@@ -98,6 +98,11 @@ def _configure_dashboard_env(config: SuiteConfig) -> None:
     os.environ["DASHBOARD_VIEW_TOKEN"] = config.dashboard.view_token.get_secret_value()
     os.environ["DASHBOARD_ADMIN_TOKEN"] = config.dashboard.admin_token.get_secret_value()
     os.environ["DASHBOARD_INGEST_TOKEN"] = config.dashboard.ingest_token.get_secret_value()
+    # Only exported when configured. os.environ wins over the Settings env_file,
+    # so unconditionally exporting an empty value would silently override an
+    # allow list set in /etc/alpha-spy/dashboard.env.
+    if config.dashboard.allowed_origins:
+        os.environ["DASHBOARD_ALLOWED_ORIGINS"] = ",".join(config.dashboard.allowed_origins)
     os.environ["TRADIER_ENV"] = config.tradier.environment
     os.environ["TRADIER_ACCESS_TOKEN"] = config.tradier.access_token.get_secret_value()
     os.environ["TRADIER_ACCOUNT_ID"] = config.tradier.account_id

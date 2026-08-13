@@ -350,6 +350,10 @@ class DashboardConfig(BaseModel):
     admin_token: SecretStr = SecretStr("")
     ingest_token: SecretStr = SecretStr("")
     websocket_interval_seconds: float = 1.0
+    # Browser origins allowed to call the API cross-origin. Needed only when the
+    # workstation is hosted off this machine (e.g. Vercel); empty means no
+    # cross-origin access, which is correct for the loopback/SSH-tunnel default.
+    allowed_origins: list[str] = []
 
 
 class BackupConfig(BaseModel):
