@@ -33,6 +33,21 @@ standing down, and a thirty-gate validation run with two failures — so every p
 reachable without a live session. Point at a real dashboard with
 `ALPHA_SPY_DASHBOARD=http://host:port npm run dev`.
 
+## Deploying elsewhere
+
+Served by FastAPI on the trading host the API is same-origin and needs no
+configuration. Hosted anywhere else — Vercel, a CDN — set the backend origin at
+build time and allow that origin through CORS on the dashboard:
+
+```sh
+VITE_API_ORIGIN=https://dashboard.example.com npm run build:vercel
+# and on the VPS: DASHBOARD_ALLOWED_ORIGINS=https://alpha-spy.vercel.app
+```
+
+The engine itself cannot be hosted on a serverless platform — it is a stateful
+service with a local SQLite journal and a persistent websocket. See
+`docs/BUILD_AND_DEPLOY.md`.
+
 ## Stack
 
 | Concern | Choice |

@@ -4,6 +4,13 @@
 
 ### Added
 
+- Optional off-host hosting for the workstation. `vercel.json` builds the SPA
+  for a CDN, `VITE_API_ORIGIN` points it at a remote dashboard, and
+  `DASHBOARD_ALLOWED_ORIGINS` opens CORS for that origin on the engine host.
+  Leaving both unset preserves the same-origin VPS behaviour exactly. CORS is
+  exact-origin and `allow_credentials=False`; a literal `*` is ignored rather
+  than honoured. The engine itself is not serverless-hostable and stays on the
+  VPS.
 - Replaced the static HTML/vanilla-JS dashboard with a React + TypeScript + Vite
   single-page workstation under `frontend/`, compiled into the existing FastAPI
   static directory. The compiled bundle is committed and shipped in the wheel, so

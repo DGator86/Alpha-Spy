@@ -9,7 +9,8 @@
     "build": "tsc -b && vite build",
     "build:preview": "VITE_STATIC_DEMO=1 vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "build:vercel": "BUILD_TARGET=vercel tsc -b && BUILD_TARGET=vercel vite build"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

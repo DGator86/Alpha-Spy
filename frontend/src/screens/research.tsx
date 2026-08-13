@@ -13,6 +13,7 @@ import {
   Th,
   toneForState,
 } from '@/components/ui/primitives'
+import { apiUrl } from '@/lib/backend'
 import { cn } from '@/lib/cn'
 import { EMPTY, clock, hhmm, isNum, num, pct, signed, stamp, titleize } from '@/lib/format'
 import { STATIC_DEMO, useWorkstation } from '@/store/workstation'
@@ -43,7 +44,7 @@ function useForecastDetail(id: string | null) {
     let cancelled = false
     setRecord(null)
     setError('')
-    fetch(`/api/v1/predictions/${encodeURIComponent(id)}`, {
+    fetch(apiUrl(`/api/v1/predictions/${encodeURIComponent(id)}`), {
       headers: viewToken ? { 'X-Dashboard-Token': viewToken } : {},
     })
       .then(async (response) => {

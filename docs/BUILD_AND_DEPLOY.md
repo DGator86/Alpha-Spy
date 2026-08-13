@@ -257,6 +257,62 @@ PYTHONPATH=src python3 scripts/generate_preview_snapshot.py
 It is anchored to a fixed timestamp, so re-running it against an unchanged demo
 generator produces an identical file.
 
+## Hosting the workstation on Vercel
+
+The engine cannot run on Vercel. The dashboard is a stateful FastAPI service
+with a local SQLite journal, a websocket that streams every second, and
+systemd-managed collector/engine/validation units. Vercel functions are
+stateless and ephemeral and do not hold long-lived websockets. **Vercel hosts
+the workstation UI only; the engine stays on the VPS.**
+
+`vercel.json` at the repository root configures this. It builds
+`frontend/` with `BUILD_TARGET=vercel` (root base path, `frontend/dist` output),
+rewrites unknown paths to `index.html` for client-side routing, and marks the
+deployment `noindex`.
+
+Two settings make it work:
+
+1. **On Vercel**, set an environment variable so the bundle knows where the API
+   lives. Without it every request resolves against the CDN instead of the
+   engine:
+
+   ```
+   VITE_API_ORIGIN=https://dashboard.example.com
+   ```
+
+   It is read at build time, so changing it requires a redeploy. It must be
+   `https://` if the Vercel page is served over https — browsers block mixed
+   content, and the app deliberately does not rewrite the scheme for you.
+
+2. **On the VPS**, allow the Vercel origin through CORS in
+   `/etc/alpha-spy/dashboard.env`:
+
+   ```
+   DASHBOARD_ALLOWED_ORIGINS=https://alpha-spy.vercel.app
+   ```
+
+   Comma separated for several origins (Vercel preview deployments each get
+   their own hostname). Unset means no cross-origin access at all, which is the
+   correct default for a loopback deployment. A literal `*` is ignored rather
+   than honoured.
+
+The dashboard must also be reachable from the internet over HTTPS for this to
+work at all — a reverse proxy with a certificate, or a tunnel. It is
+loopback-bound by default.
+
+### What protects it
+
+Publishing the UI does not publish the data: the bundle is a static page that
+holds no credentials, and every API call carries an explicit `X-Dashboard-Token`
+header the operator types in. CORS is configured `allow_credentials=False` and
+exact-origin, so a hostile page cannot ride an ambient session even if it learns
+the URL.
+
+That leaves the tokens as the control on the dashboard itself. Set
+`DASHBOARD_REQUIRE_VIEW_TOKEN=true` and use distinct view and admin tokens.
+Vercel's own Deployment Protection is worth enabling on top, so the page is not
+publicly reachable at all.
+
 ## Front-end builds
 
 The workstation compiles into `src/alpha_spy/dashboard/static/`, and **the
@@ -270,6 +326,18 @@ make frontend         # rebuild into src/alpha_spy/dashboard/static/
 
 Commit the regenerated `static/` output in the same change. CI rebuilds the
 bundle and fails if the committed output does not match the committed sources.
+
+There are three build targets, all from the same sources:
+
+| Command | Target | Base | Output | API |
+| --- | --- | --- | --- | --- |
+| `npm run build` | VPS (shipped in the wheel) | `/static/` | `src/alpha_spy/dashboard/static/` | same origin |
+| `npm run build:vercel` | Vercel | `/` | `frontend/dist/` | `VITE_API_ORIGIN` |
+| `npm run build:preview` | GitHub Pages demo | `./` | `frontend/dist-preview/` | none — committed snapshot |
+
+Only the first is committed. Leaving `VITE_API_ORIGIN` unset preserves the
+original same-origin behaviour exactly, so the VPS bundle is unaffected by the
+Vercel support.
 
 ## Repository layout
 
