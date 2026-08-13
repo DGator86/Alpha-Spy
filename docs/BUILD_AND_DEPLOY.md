@@ -236,12 +236,40 @@ the older archive.
 
 ## GUI preview
 
-`.github/workflows/pages.yml` publishes
-`preview/standalone-command-center.html` to GitHub Pages on pushes to `main`
-that touch `preview/`. The page is static and self-contained — no live data, no
-credentials, no connection to a running instance — and the workflow fails if it
-ever gains an external resource reference. Enable it once under
+`.github/workflows/pages.yml` publishes the workstation to GitHub Pages on
+pushes to `main` that touch `frontend/`. It is a real build of the shipping
+application (`npm run build:preview`) with the network layer replaced by a
+committed synthetic snapshot, so the published page cannot drift away from the
+product the way a separately maintained mock does.
+
+The page is static and self-contained — no live data, no credentials, no
+connection to a running instance, operator commands disabled — and the workflow
+fails if it ever gains an external resource reference or is built without the
+snapshot chunk. Enable it once under
 **Settings → Pages → Source: GitHub Actions**.
+
+Regenerate the snapshot with:
+
+```sh
+PYTHONPATH=src python3 scripts/generate_preview_snapshot.py
+```
+
+It is anchored to a fixed timestamp, so re-running it against an unchanged demo
+generator produces an identical file.
+
+## Front-end builds
+
+The workstation compiles into `src/alpha_spy/dashboard/static/`, and **the
+compiled bundle is committed** so the wheel ships pre-built assets and a trading
+VPS never needs a Node toolchain. After changing anything under `frontend/`:
+
+```sh
+make frontend-deps    # once, or after dependency changes
+make frontend         # rebuild into src/alpha_spy/dashboard/static/
+```
+
+Commit the regenerated `static/` output in the same change. CI rebuilds the
+bundle and fails if the committed output does not match the committed sources.
 
 ## Repository layout
 

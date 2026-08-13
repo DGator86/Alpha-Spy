@@ -22,7 +22,7 @@ from .models import (
     utc_now_iso,
 )
 from .security import verify_admin_token, verify_ingest_token, verify_view_token, websocket_authorized
-from .service import DashboardService
+from .service import DashboardService, SectionStream
 
 
 class Runtime:
@@ -105,6 +105,15 @@ async def alerts(limit: int = Query(default=100, ge=1, le=1000)) -> list[dict]:
     return runtime.repo.list_alerts(limit)
 
 
+@app.get("/api/v1/predictions/{prediction_id}", dependencies=[Depends(view_guard)])
+async def prediction_detail(prediction_id: str) -> dict:
+    """Full forecast record including the model payload, for the inspector."""
+    record = runtime.repo.get_prediction(prediction_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Prediction not found")
+    return record
+
+
 @app.post("/api/v1/ingest/snapshot")
 async def ingest_snapshot(
     envelope: SnapshotEnvelope,
@@ -184,13 +193,38 @@ async def acknowledge_alert(alert_id: int) -> dict:
 
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket):
+    """Stream the dashboard state as an opening snapshot followed by deltas.
+
+    The first frame is ``{"type": "snapshot", "sections": {...}}`` carrying every
+    section. Subsequent frames are ``{"type": "patch", "sections": {...}}`` and
+    contain only the sections whose contents actually changed, so a SPY tick no
+    longer drags 120 predictions, 60 alerts and the promotion evidence across the
+    wire behind it. A ``heartbeat`` frame is sent when nothing changed, which
+    keeps the connection warm and gives the client a liveness signal it can
+    distinguish from a stalled engine.
+    """
     if not await websocket_authorized(websocket, runtime.settings):
         await websocket.close(code=4401)
         return
     await websocket.accept()
+    stream = SectionStream()
     try:
+        await websocket.send_json(stream.snapshot(runtime.service.build_state()))
         while True:
-            await websocket.send_json(runtime.service.build_state())
             await asyncio.sleep(runtime.settings.websocket_interval_seconds)
+            frame = stream.patch(runtime.service.build_state())
+            if frame is None:
+                frame = {"type": "heartbeat", "seq": stream.seq, "timestamp": utc_now_iso()}
+            await websocket.send_json(frame)
     except WebSocketDisconnect:
         pass
+
+
+# Registered last so it can never shadow an API or socket route. The workstation
+# routes client-side, so a refresh on /governance/validation has to return the
+# shell rather than a 404.
+@app.get("/{path:path}")
+async def spa_fallback(path: str) -> FileResponse:
+    if path.startswith(("api/", "ws/", "static/")):
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(static_dir / "index.html")

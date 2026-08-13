@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,6 +13,98 @@ from .tradier import TradierReadOnlyClient
 
 def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+# Section names are the unit of change on the wire. The engine republishes the
+# whole snapshot every cycle, but the parts of it move at wildly different
+# cadences: a SPY tick changes several times a second while the validation gate
+# list changes once a day. Splitting the state lets the socket send the tick
+# without resending 5,000 forecasts' worth of promotion evidence behind it.
+SECTIONS: dict[str, tuple[str, ...]] = {
+    "engine": ("engine",),
+    "session": ("session",),
+    "market": ("market",),
+    "forecast": ("forecast_horizons", "prediction_series", "price_series"),
+    "decision": ("decision",),
+    "candidates": ("candidates",),
+    "position": ("position", "broker_reconciliation"),
+    "account": ("account",),
+    "health": ("health",),
+    "audit": ("audit", "prediction_metrics"),
+    "predictions": ("predictions",),
+    "alerts": ("alerts",),
+    "commands": ("commands",),
+    "validation": ("promotion", "replay"),
+    "security": ("security",),
+    "services": ("services", "tradier"),
+    "research": (
+        "strategy_matrix",
+        "challengers",
+        "attribution",
+        "constituent_attribution",
+    ),
+}
+
+
+def _digest(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.blake2b(encoded, digest_size=8).hexdigest()
+
+
+def split_sections(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Split a flat dashboard state into the sections published on the socket."""
+    sections: dict[str, dict[str, Any]] = {}
+    for name, keys in SECTIONS.items():
+        section = {key: state[key] for key in keys if key in state}
+        if section:
+            sections[name] = section
+    return sections
+
+
+class SectionStream:
+    """Tracks what a single socket has already been sent.
+
+    One instance per connection, so a client that joins mid-session still gets a
+    complete opening snapshot while established clients keep receiving deltas.
+    """
+
+    def __init__(self) -> None:
+        self.seq = 0
+        self._digests: dict[str, str] = {}
+
+    def snapshot(self, state: dict[str, Any]) -> dict[str, Any]:
+        sections = split_sections(state)
+        self._digests = {name: _digest(body) for name, body in sections.items()}
+        self.seq += 1
+        return {
+            "type": "snapshot",
+            "seq": self.seq,
+            "timestamp": state.get("timestamp") or utc_now_iso(),
+            "sections": sections,
+        }
+
+    def patch(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        """Return a frame carrying only the sections that changed, or None."""
+        sections = split_sections(state)
+        changed: dict[str, Any] = {}
+        for name, body in sections.items():
+            digest = _digest(body)
+            if self._digests.get(name) != digest:
+                self._digests[name] = digest
+                changed[name] = body
+        dropped = [name for name in self._digests if name not in sections]
+        for name in dropped:
+            self._digests.pop(name, None)
+        if not changed and not dropped:
+            return None
+        self.seq += 1
+        return {
+            "type": "patch",
+            "seq": self.seq,
+            "timestamp": state.get("timestamp") or utc_now_iso(),
+            "sections": changed,
+            "removed": dropped,
+        }
 
 
 class DashboardService:
@@ -69,6 +163,13 @@ class DashboardService:
             "account": {}, "market": {}, "position": {"open": False},
             "audit": {}, "strategy_matrix": [], "challengers": [], "services": [],
             "price_series": [], "prediction_series": [], "attribution": [],
+            "forecast_horizons": {}, "candidates": [],
+            "decision": {"action": "WAITING", "reason": "engine_snapshot_missing", "gates": []},
+            "promotion": {"status": "NOT_RUN", "gates": [], "failed_gates": []},
+            "replay": {"status": "NOT_RUN"},
+            "security": {"execution_mode": "UNKNOWN", "live_authorization": False},
+            "broker_reconciliation": {},
+            "constituent_attribution": [],
         }
         state = dict(state)
         state["predictions"] = self.repo.list_predictions(120)

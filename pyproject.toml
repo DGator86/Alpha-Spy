@@ -45,7 +45,9 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-"alpha_spy.dashboard" = ["static/*"]
+# Recursive: the workstation build emits hashed bundles into static/assets/,
+# and a single-level "static/*" glob would ship index.html without its scripts.
+"alpha_spy.dashboard" = ["static/**/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

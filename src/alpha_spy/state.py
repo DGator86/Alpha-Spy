@@ -171,6 +171,83 @@ def build_dashboard_state(
         mode = "PAPER_BROKER"
     else:
         mode = "LIVE"
+
+    # The candidate table is what makes the ranking inspectable rather than
+    # magical: every structure the ranker scored, with the economics it was
+    # scored on, not only the one that won.
+    candidate_rows = [
+        {
+            "candidate_id": candidate.get("candidate_id"),
+            "strategy": candidate.get("strategy"),
+            "status": candidate.get("status"),
+            "score": candidate.get("score"),
+            "expected_value": candidate.get("expected_value"),
+            "probability_profit": candidate.get("probability_profit"),
+            "max_loss": candidate.get("max_loss"),
+            "max_profit": candidate.get("max_profit"),
+            "entry_value": candidate.get("entry_value"),
+            "legs": candidate.get("legs", []),
+            "rejection_reason": candidate.get("payload", {}).get("rejection_reason"),
+            "valuation_method": candidate.get("payload", {}).get("valuation_method"),
+            "q_executable_edge": candidate.get("payload", {}).get("q_executable_edge"),
+            "stress_expected_value": candidate.get("payload", {}).get("stress_expected_value"),
+            "doubled_cost_expected_value": candidate.get("payload", {}).get(
+                "doubled_cost_expected_value"
+            ),
+            "breakevens": candidate.get("payload", {}).get("breakevens", []),
+            "greeks": candidate.get("payload", {}).get("greeks", {}),
+            "payload": candidate.get("payload", {}),
+        }
+        for candidate in candidates
+    ]
+
+    decision_payload = decision.get("payload", {}) if decision else {}
+    decision_state = {
+        "decision_id": decision.get("decision_id"),
+        "prediction_id": decision.get("prediction_id"),
+        "candidate_id": decision.get("candidate_id"),
+        "created_at": decision.get("created_at"),
+        "action": decision.get("action", "WAITING"),
+        "reason": decision.get("reason", "no_decision_yet"),
+        "allowed_risk": decision.get("allowed_risk"),
+        "trust_score": decision.get("trust_score"),
+        "health_state": decision.get("health_state"),
+        # The full ladder, not only the first failure. A NO_TRADE is only
+        # useful if you can see which of the eleven gates actually stopped it.
+        "gates": decision_payload.get("gates", []),
+        "failed_gates": decision_payload.get("failed_gates", []),
+        "candidate": decision_payload.get("candidate"),
+        "trades_today": decision_payload.get("trades_today"),
+        "considered_candidates": decision_payload.get("considered_candidates"),
+        "affordable_candidates": decision_payload.get("affordable_candidates"),
+    }
+
+    approved, approval_reason = config.production_approval_status()
+    security_state = {
+        "execution_mode": mode,
+        "submit_orders": config.trading.submit_orders,
+        "paper_mode": config.trading.paper_mode,
+        "broker_environment": config.tradier.environment,
+        "market_data_environment": config.tradier.market_environment,
+        "production_unlocked": config.production_is_unlocked(),
+        "production_sentinel": str(config.paths.production_sentinel),
+        "production_sentinel_present": config.paths.production_sentinel.is_file(),
+        "production_approval": str(config.paths.production_approval),
+        "production_approval_present": config.paths.production_approval.is_file(),
+        "production_approval_valid": approved,
+        "production_approval_reason": approval_reason,
+        "production_credential_present": bool(
+            config.tradier.access_token.get_secret_value()
+        ),
+        "live_authorization": (
+            config.trading.submit_orders
+            and config.tradier.environment == "production"
+            and config.production_is_unlocked()
+            and approved
+        ),
+        "automatic_live_enable": False,
+    }
+
     return {
         "timestamp": utc_iso(now),
         "engine": {
@@ -272,13 +349,21 @@ def build_dashboard_state(
         "promotion": {
             "status": promotion.get("status", validation.get("status") if validation else "NOT_RUN"),
             "validation_id": promotion.get("validation_id", validation.get("validation_id") if validation else None),
+            "created_at": validation.get("created_at") if validation else None,
             "sessions": promotion.get("sessions", validation.get("sessions") if validation else 0),
             "matured_forecasts": promotion.get("matured_forecasts", validation.get("matured_forecasts") if validation else 0),
             "trades": promotion.get("trades", validation.get("trades") if validation else 0),
+            # The gate list is the launch checklist. Publishing only the failed
+            # names told the operator what was broken but never how close the
+            # passing gates were to their thresholds.
+            "gates": promotion.get("gates", []),
             "failed_gates": promotion.get("failed_gates", []),
+            "metrics": promotion.get("metrics", {}),
             "automatic_live_enable": False,
             "report_path": str(config.paths.promotion_report),
         },
+        "security": security_state,
+        "candidates": candidate_rows,
         "replay": {
             "status": replay.get("status", "NOT_RUN") if replay else "NOT_RUN",
             "replay_id": replay.get("replay_id") if replay else None,
@@ -340,6 +425,6 @@ def build_dashboard_state(
             },
         ],
         "constituent_attribution": attribution,
-        "decision": decision,
+        "decision": decision_state,
         "alerts": alerts,
     }
