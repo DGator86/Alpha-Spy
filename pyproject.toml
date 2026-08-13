@@ -45,9 +45,13 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Recursive: the workstation build emits hashed bundles into static/assets/,
-# and a single-level "static/*" glob would ship index.html without its scripts.
-"alpha_spy.dashboard" = ["static/**/*"]
+# Two explicit patterns rather than "static/**/*". setuptools expands these with
+# glob, and `**` only recurses when glob is called with recursive=True — which
+# older setuptools does not do. Without it, "static/**/*" behaves like
+# "static/*/*": it matches static/assets/* but silently MISSES static/index.html,
+# producing a wheel with the scripts and no page to load them. Listing both
+# levels explicitly is correct under either behaviour.
+"alpha_spy.dashboard" = ["static/*", "static/assets/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
