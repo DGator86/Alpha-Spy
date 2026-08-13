@@ -59,6 +59,20 @@ Runs post-session research/governance analysis. It does not mutate the live mode
 
 Bind to loopback by default. The dashboard exposes the authoritative 15m trade forecast plus the full horizon stack, regime hierarchy, context/input health, P/Q diagnostics, current professional position-management state, replay status and promotion gates. Authenticated operator commands are queued; the execution engine remains authoritative.
 
+`build_dashboard_state` additionally publishes the ranked candidate book, the decision's entry-gate ladder, the paper-validation gate list with thresholds, and a `security` block describing production-authorization state. The gate ladder matters operationally: `choose_decision` evaluates every entry gate rather than short-circuiting, so a `NO_TRADE` carries the state of all eleven checks and not only the first failure. The headline `reason` is still the first failing gate, unchanged.
+
+### Workstation front end
+
+`frontend/` holds a React + TypeScript + Vite single-page application that compiles into `src/alpha_spy/dashboard/static/`. The compiled bundle is committed and shipped in the wheel, so a trading VPS never needs Node installed. Rebuild with `make frontend` after any change under `frontend/`, and commit the regenerated `static/` output with it — CI fails if the committed bundle does not match the committed sources.
+
+The FastAPI app serves the bundle and falls through to `index.html` for unknown non-API paths so client-side routes survive a refresh. The workstation issues only the existing guarded commands; it cannot place, modify or cancel a broker order.
+
+#### Websocket protocol
+
+`/ws/live` sends an opening `snapshot` frame carrying every section, then `patch` frames carrying only the sections whose contents changed, and a `heartbeat` when nothing changed. Sections are defined by `SECTIONS` in `alpha_spy/dashboard/service.py`; each is replaced wholesale rather than field-diffed, so a section the engine stops publishing is reported in `removed` instead of leaving stale keys alive on the client. Digests are tracked per connection, so a client joining mid-session still receives a complete snapshot.
+
+This exists because the previous socket resent the entire `build_state()` payload every tick — a SPY quote change dragged 120 predictions, 60 alerts and the promotion evidence across the wire behind it. `GET /api/v1/dashboard/state` still returns the flat merged state for any non-streaming consumer.
+
 ## Persistence
 
 SQLite WAL is the authoritative journal for structured runtime state. Raw high-volume market observations are additionally written to dated JSONL records. Validation/replay/event-calendar evidence is retained under the state root and included in backups.

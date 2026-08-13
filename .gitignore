@@ -31,3 +31,10 @@ config/secrets.env
 *.sqlite
 *.sqlite3
 *.db
+
+# Frontend build inputs. The compiled workstation bundle under
+# src/alpha_spy/dashboard/static/ IS committed — the wheel ships it so a
+# trading VPS never needs Node — but its dependencies and caches are not.
+frontend/node_modules/
+frontend/tsconfig.tsbuildinfo
+frontend/dist-preview/

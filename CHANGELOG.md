@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased — Workstation front end
+
+### Added
+
+- Replaced the static HTML/vanilla-JS dashboard with a React + TypeScript + Vite
+  single-page workstation under `frontend/`, compiled into the existing FastAPI
+  static directory. The compiled bundle is committed and shipped in the wheel, so
+  a trading VPS still needs no Node toolchain.
+- 26 screens across Command, Market, Trading, Intelligence, Research, Governance
+  and System, including a decision panel that renders the full entry-gate ladder,
+  a sortable options strategy lab with payoff diagrams, a hierarchical regime
+  cockpit with click-through classification evidence, a paper-validation launch
+  checklist, and a clickable forecast inspector.
+- Forecast cone rendered as a Lightweight Charts custom series, so the
+  P10/P25/P50/P75/P90 term structure lives in the chart's own coordinate space
+  and survives pan and zoom.
+- `GET /api/v1/predictions/{prediction_id}` returning a full forecast record
+  including its model payload, backing the forecast inspector.
+- `make frontend`, `make frontend-deps` and `make frontend-check` targets, plus a
+  CI job that rebuilds the bundle and fails if the committed output is stale.
+
+### Changed
+
+- `choose_decision` now evaluates every entry gate instead of short-circuiting on
+  the first failure, and publishes the whole ladder on the decision record. A
+  `NO_TRADE` reports the state of all eleven checks rather than one. The headline
+  `reason` is unchanged — still the first failing gate, with the same codes.
+- `/ws/live` sends an opening `snapshot` frame and then `patch` frames carrying
+  only the sections that changed, with a `heartbeat` when nothing did. The socket
+  previously resent the entire state every tick, so a quote change dragged 120
+  predictions, 60 alerts and the promotion evidence behind it. Steady-state
+  traffic drops to roughly 30% of the previous payload.
+  `GET /api/v1/dashboard/state` still returns the flat merged state.
+- `build_dashboard_state` publishes the ranked candidate book, the full
+  paper-validation gate list with thresholds, and a `security` block describing
+  production-authorization state. The security block fails closed: the sentinel
+  alone does not report authorization.
+- Demo mode generates the full state surface — seven horizons, regime hierarchy,
+  candidate book, gate ladder and a thirty-gate validation run — so every panel is
+  reachable without a live session.
+- Package data glob widened to `static/**/*`; the previous single-level glob would
+  have shipped `index.html` without its hashed asset bundles.
+
+
 ## 3.0.0 — 2026-08-10
 
 - Unified the production-real-time-data / Tradier-sandbox-paper operating mode.

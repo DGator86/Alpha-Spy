@@ -1,0 +1,122 @@
+@import 'tailwindcss';
+
+/*
+ * Alpha-SPY workstation palette.
+ *
+ * Committed single-theme dark: this is a screen that stays open in a dim room
+ * all session and whose whole job is making risk state unmissable. A light
+ * variant would halve the contrast range available for the state colours, so
+ * the page paints its own ground rather than inheriting one.
+ *
+ * The three state colours are reserved. Green/amber/red never decorate — they
+ * only ever mean pass / watch / fail. Anything neutral uses the slate ramp and
+ * anything the model produced uses cyan, so "the machine thinks this" is
+ * visually distinct from "this is what happened".
+ */
+@theme {
+  --color-ground: #05090d;
+  --color-surface: #0a1118;
+  --color-surface-2: #0e1720;
+  --color-surface-3: #131f2a;
+  --color-line: #1b2937;
+  --color-line-bright: #263a4d;
+
+  --color-ink: #e8f1f7;
+  --color-ink-2: #9db2c3;
+  --color-ink-3: #64798c;
+  --color-ink-4: #415465;
+
+  --color-signal: #38d7ff;
+  --color-signal-dim: #1b6f8a;
+  --color-pass: #2ee6a8;
+  --color-watch: #ffb648;
+  --color-fail: #ff4f6b;
+  --color-flat: #5d7185;
+
+  --font-mono: 'SFMono-Regular', 'JetBrains Mono', 'Menlo', 'Consolas', ui-monospace, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numeric columns must never jitter as digits change on a live tick. */
+.tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Section labels. Small, wide-tracked, and quiet — they name a panel without
+   competing with the number inside it. */
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2f3e;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2b4356;
+}
+
+/* A live value that just changed gets a single brief wash of colour. It is the
+   cheapest way to answer "is this stale or is it moving?" without a spinner. */
+@keyframes tick-up {
+  from {
+    background-color: color-mix(in oklab, var(--color-pass) 26%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@keyframes tick-down {
+  from {
+    background-color: color-mix(in oklab, var(--color-fail) 26%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.tick-up {
+  animation: tick-up 620ms ease-out;
+}
+.tick-down {
+  animation: tick-down 620ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tick-up,
+  .tick-down {
+    animation: none;
+  }
+}

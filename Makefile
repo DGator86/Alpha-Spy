@@ -4,13 +4,16 @@ NAME := alpha-spy-v$(VERSION)
 # Build output. release/ holds the archived upstream drops and is not written to.
 RELEASE_DIR := dist/release
 
-.PHONY: help venv test lint smoke build release verify verify-release deploy clean
+.PHONY: help venv test lint smoke build release verify verify-release deploy clean \
+        frontend frontend-deps frontend-check
 
 help:
 	@echo "Alpha-SPY $(VERSION)"
 	@echo
 	@echo "  make venv            create .venv with runtime and dev dependencies"
-	@echo "  make lint            static validation (python, shell, javascript, systemd)"
+	@echo "  make lint            static validation (python, shell, typescript, systemd)"
+	@echo "  make frontend        rebuild the workstation bundle into the dashboard static dir"
+	@echo "  make frontend-deps   install frontend dependencies (npm ci)"
 	@echo "  make test            run the test suite"
 	@echo "  make build           build the application wheel into dist/"
 	@echo "  make smoke           install the built wheel in a temp venv and exercise it"
@@ -35,9 +38,23 @@ lint:
 	bash -n install.sh scripts/*.sh scripts/alpha-spy-backup
 	@if command -v ruff >/dev/null; then ruff check src tests examples; \
 		else echo "ruff not installed (make venv); skipped lint"; fi
-	@if command -v node >/dev/null; then node --check src/alpha_spy/dashboard/static/app.js; \
-		else echo "node not installed; skipped dashboard javascript check"; fi
+	@if command -v npm >/dev/null; then $(MAKE) frontend-check; \
+		else echo "npm not installed; skipped workstation typecheck"; fi
 	bash scripts/verify_units.sh
+
+frontend-deps:
+	cd frontend && npm ci
+
+# Typecheck only. The committed bundle under src/alpha_spy/dashboard/static/ is
+# what ships, so CI verifies the sources compile without forcing a rebuild.
+frontend-check:
+	cd frontend && npm run typecheck
+
+# Rebuilds the workstation bundle in place. Run this after any change under
+# frontend/ and commit the regenerated static/ output alongside it — the wheel
+# ships pre-built assets so a trading VPS never needs Node.
+frontend:
+	cd frontend && npm run build
 
 build:
 	$(PYTHON) -m build --wheel --outdir dist

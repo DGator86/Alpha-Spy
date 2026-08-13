@@ -39,11 +39,44 @@ jobs:
       - name: Shell syntax
         run: bash -n install.sh scripts/*.sh scripts/alpha-spy-backup
 
-      - name: Dashboard JavaScript syntax
-        run: node --check src/alpha_spy/dashboard/static/app.js
-
       - name: systemd units and timers
         run: bash scripts/verify_units.sh
+
+  workstation:
+    name: Workstation front end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+
+      # The wheel ships pre-built assets so a trading VPS never needs Node. That
+      # only holds if the committed bundle matches the committed sources, so a
+      # rebuild that changes anything under static/ fails the job.
+      - name: Committed bundle is current
+        run: |
+          if ! git diff --quiet -- src/alpha_spy/dashboard/static; then
+            echo "::error::The committed workstation bundle is stale."
+            echo "Run 'make frontend' and commit src/alpha_spy/dashboard/static/."
+            git --no-pager diff --stat -- src/alpha_spy/dashboard/static
+            exit 1
+          fi
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
