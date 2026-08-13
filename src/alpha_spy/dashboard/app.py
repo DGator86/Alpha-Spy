@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -55,6 +56,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="SPY Alpha Command Center", version="3.0.0", lifespan=lifespan)
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# CORS is only wired up when an allow list is configured, which keeps the
+# default loopback deployment byte-identical to before. Origins are exact — no
+# wildcard, and no credentialed requests, because the workstation authenticates
+# with an explicit X-Dashboard-Token header rather than a cookie. That means a
+# hostile page cannot ride an ambient session even if it learns the URL.
+_cors_origins = get_settings().allowed_origins
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "X-Dashboard-Token", "Content-Type"],
+    )
 
 
 def view_guard(

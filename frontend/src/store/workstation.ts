@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { apiUrl, wsUrl } from '@/lib/backend'
 import type { CommandName, ConnectionStatus, Frame, WorkstationState } from '@/lib/types'
 
 const VIEW_TOKEN_KEY = 'alphaSpyViewToken'
@@ -91,9 +92,8 @@ export const useWorkstation = create<WorkstationStore>((set, get) => ({
     }
 
     const token = get().viewToken
-    const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
     const query = token ? `?token=${encodeURIComponent(token)}` : ''
-    const next = new WebSocket(`${protocol}://${location.host}/ws/live${query}`)
+    const next = new WebSocket(wsUrl(`/ws/live${query}`))
     socket = next
     set({ status: get().state.timestamp ? 'reconnecting' : 'connecting' })
 
@@ -160,7 +160,7 @@ export const useWorkstation = create<WorkstationStore>((set, get) => ({
     // Validated against the REST endpoint before it is stored, so a bad token
     // fails with a message here instead of an opaque socket close later.
     try {
-      const response = await fetch('/api/v1/dashboard/state', { headers: viewHeaders(token) })
+      const response = await fetch(apiUrl('/api/v1/dashboard/state'), { headers: viewHeaders(token) })
       if (!response.ok) {
         set({ authError: 'Token rejected' })
         return false
@@ -187,7 +187,7 @@ export const useWorkstation = create<WorkstationStore>((set, get) => ({
     const admin = get().adminToken
     if (!admin) return { ok: false, message: 'Administrator token required' }
     try {
-      const response = await fetch('/api/v1/control/command', {
+      const response = await fetch(apiUrl('/api/v1/control/command'), {
         method: 'POST',
         headers: { 'X-Dashboard-Token': admin, 'Content-Type': 'application/json' },
         body: JSON.stringify({ command, confirm, reason: 'workstation operator' }),
@@ -212,7 +212,7 @@ export const useWorkstation = create<WorkstationStore>((set, get) => ({
     const admin = get().adminToken
     if (!admin) return false
     try {
-      const response = await fetch(`/api/v1/alerts/${id}/acknowledge`, {
+      const response = await fetch(apiUrl(`/api/v1/alerts/${id}/acknowledge`), {
         method: 'POST',
         headers: { 'X-Dashboard-Token': admin },
       })
@@ -254,7 +254,7 @@ export async function bootstrap(): Promise<void> {
   }
   const store = useWorkstation.getState()
   try {
-    const response = await fetch('/api/v1/auth/mode')
+    const response = await fetch(apiUrl('/api/v1/auth/mode'))
     const mode = (await response.json()) as { view_token_required?: boolean }
     if (mode.view_token_required && !store.viewToken) {
       useWorkstation.setState({ viewTokenRequired: true, status: 'unauthorized' })
