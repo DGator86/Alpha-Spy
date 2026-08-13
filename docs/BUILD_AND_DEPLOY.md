@@ -297,20 +297,28 @@ Two settings make it work:
    content, and the app deliberately does not rewrite the scheme for you.
 
 2. **On the VPS**, allow the Vercel origin through CORS in
-   `/etc/alpha-spy/dashboard.env`:
+   `/etc/alpha-spy/config.yaml`:
 
-   ```
-   DASHBOARD_ALLOWED_ORIGINS=https://alpha-spy.vercel.app
+   ```yaml
+   dashboard:
+     allowed_origins:
+       - https://alpha-spy.vercel.app
    ```
 
-   Comma separated for several origins (Vercel preview deployments each get
-   their own hostname). Unset means no cross-origin access at all, which is the
-   correct default for a loopback deployment. A literal `*` is ignored rather
-   than honoured.
+   Vercel preview deployments each get their own hostname, so add those too if
+   you want previews to work. An empty list means no cross-origin access at
+   all, which is the correct default for a loopback deployment. A literal `*`
+   is ignored rather than honoured.
+
+   (`DASHBOARD_ALLOWED_ORIGINS` in `/etc/alpha-spy/dashboard.env` also works and
+   is used by deployments that run `alpha_spy.dashboard.app` directly, but
+   `config.yaml` is canonical on a VPS install — it is where every other
+   dashboard setting lives.)
 
 The dashboard must also be reachable from the internet over HTTPS for this to
-work at all — a reverse proxy with a certificate, or a tunnel. It is
-loopback-bound by default.
+work at all — it is loopback-bound by default, and the documented access method
+is an SSH tunnel. **See `docs/REMOTE_ACCESS.md` for the full runbook**, including
+whether you need this at all.
 
 ### What protects it
 
