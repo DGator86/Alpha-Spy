@@ -37,9 +37,12 @@ Consequences worth internalising:
   browsers block it as mixed content. This is why a bare IP is not enough — you
   need a hostname you can get a certificate for.
 
-## Step 1 — Give the dashboard a public HTTPS hostname
+## Step 1 — Give the dashboard a reachable HTTPS hostname
 
-Pick one. Both terminate TLS and proxy websockets correctly.
+Pick one. All three terminate TLS and proxy websockets correctly.
+
+**If you are not sure which, use Option C (Tailscale).** It needs no domain and
+exposes nothing to the internet, and it makes steps 2 and 3 unnecessary.
 
 ### Option A — Caddy on the VPS (simplest if you own a domain)
 
@@ -85,12 +88,34 @@ cloudflared tunnel run --url http://127.0.0.1:8788 alpha-spy
 Then install it as a service so it survives reboots (`cloudflared service
 install`).
 
-### If you have no domain
+### Option C — Tailscale (no domain, nothing public, fewest steps)
 
-Tailscale Funnel issues a public `https://<machine>.<tailnet>.ts.net` hostname
-with no domain and no open ports. Note that if you are running Tailscale anyway,
-reaching the dashboard over the tailnet directly is simpler than routing through
-Vercel at all.
+The easiest route, and the one to pick if the others look like work. It needs no
+domain, no certificate, and no open firewall ports, and the dashboard stays
+invisible to the internet — only your own devices can reach it.
+
+On the VPS:
+
+```sh
+curl -fsSL https://tailscale.com/install.sh | sh
+tailscale up          # prints a link; open it and sign in
+tailscale serve --bg 8788
+tailscale serve status # prints your https://<machine>.<tailnet>.ts.net URL
+```
+
+Then install the Tailscale app on your laptop or phone and sign in with the same
+account. Open the URL it printed. That is the whole thing.
+
+`tailscale serve` proxies to `127.0.0.1:8788` and terminates TLS itself, so the
+dashboard keeps its loopback binding and needs no configuration change at all.
+
+**This replaces the rest of this document.** Reached this way the workstation is
+same-origin, so there is no CORS to configure, no `VITE_API_ORIGIN` to set, and
+no reason to route through Vercel — steps 2 and 3 below do not apply.
+
+If you specifically want the Vercel URL to work, `tailscale funnel 8788` makes
+the same hostname public and steps 2 and 3 then apply. Be clear about the
+trade: it puts the dashboard on the internet to gain a different bookmark.
 
 ## Step 2 — Allow the Vercel origin on the VPS
 
