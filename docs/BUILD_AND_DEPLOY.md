@@ -270,6 +270,18 @@ the workstation UI only; the engine stays on the VPS.**
 rewrites unknown paths to `index.html` for client-side routing, and marks the
 deployment `noindex`.
 
+Two things about that file worth knowing before editing it:
+
+- **The rewrite deliberately excludes `api/` and `ws/`** as well as `assets/`.
+  Nothing serves those on Vercel — the engine is not there — so they must 404.
+  Letting them fall through to `index.html` returns `200 text/html`, which any
+  caller that checks only the status code reads as a successful API response.
+  That is how a wrong `VITE_API_ORIGIN` turns into "the token was accepted"
+  followed by an unexplained reconnect loop.
+- **It cannot carry comments.** Vercel validates the file against its published
+  schema with `additionalProperties: false`, so an explanatory `_comment` key
+  fails the deployment outright. Explanations go here instead.
+
 Two settings make it work:
 
 1. **On Vercel**, set an environment variable so the bundle knows where the API

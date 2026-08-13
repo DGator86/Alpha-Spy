@@ -4,7 +4,6 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "echo 'install handled by buildCommand'",
   "framework": null,
-  "_comment_rewrites": "Client-side routing, with api/ and ws/ excluded. Nothing serves those here — the engine is not on Vercel — so they must 404 rather than fall through to index.html. A 200 carrying HTML is worse than a 404: it looks like a successful API response to any caller that only checks the status code.",
   "rewrites": [{ "source": "/((?!assets/|api/|ws/).*)", "destination": "/index.html" }],
   "headers": [
     {
