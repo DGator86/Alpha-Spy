@@ -3,7 +3,12 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Sidebar } from '@/components/chrome/Sidebar'
 import { TopBar } from '@/components/chrome/TopBar'
 import { Button } from '@/components/ui/primitives'
-import { bootstrap, useWorkstation } from '@/store/workstation'
+import {
+  bootstrap,
+  readRemember,
+  setRemember as persistRemember,
+  useWorkstation,
+} from '@/store/workstation'
 import { CommandCenter } from '@/screens/CommandCenter'
 import { InternalsScreen, OptionsScreen, RegimeScreen, SpyScreen } from '@/screens/market'
 import {
@@ -43,6 +48,10 @@ function AuthGate() {
   const authError = useWorkstation((store) => store.authError)
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
+  // Defaults on. This is a single-operator tool reached over a private network,
+  // opened and closed constantly on a phone; re-typing a 43-character token
+  // every time is the wrong default.
+  const [remember, setRemember] = useState(readRemember)
 
   return (
     <div className="flex h-full items-center justify-center bg-ground">
@@ -51,6 +60,8 @@ function AuthGate() {
         onSubmit={async (event) => {
           event.preventDefault()
           setBusy(true)
+          // Recorded before the token is stored, so it lands in the right place.
+          persistRemember(remember)
           await setViewToken(token.trim())
           setBusy(false)
         }}
@@ -70,6 +81,15 @@ function AuthGate() {
           placeholder="Dashboard token"
           className="mt-3 w-full border border-line bg-surface-2 px-2 py-2 font-mono text-[12px] text-ink outline-none focus:border-signal/60"
         />
+        <label className="mt-2 flex cursor-pointer items-center gap-2 font-mono text-[10px] text-ink-3">
+          <input
+            type="checkbox"
+            checked={remember}
+            onChange={(event) => setRemember(event.target.checked)}
+            className="h-3 w-3 accent-[#38d7ff]"
+          />
+          Stay signed in on this device
+        </label>
         <Button type="submit" tone="primary" size="md" className="mt-2 w-full" disabled={busy || !token.trim()}>
           {busy ? 'Verifying…' : 'Unlock'}
         </Button>
