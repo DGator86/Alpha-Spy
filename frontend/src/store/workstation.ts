@@ -30,20 +30,66 @@ let socket: WebSocket | null = null
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 let retryDelay = 1000
 
-function readToken(key: string): string {
+const REMEMBER_KEY = 'alphaSpyRemember'
+
+/**
+ * Whether tokens survive closing the tab.
+ *
+ * Session storage was the original behaviour and it is wrong for the way this
+ * is actually used: a phone, on a private network, opened and closed dozens of
+ * times a day. It meant re-typing a 43-character token every time. The choice
+ * is now the operator's, and it persists so the answer is only given once.
+ */
+export function readRemember(): boolean {
   try {
-    return sessionStorage.getItem(key) ?? ''
+    // Absent means "not answered yet", which defaults to remembering — the
+    // same default the unlock screen shows. Only an explicit '0' opts out.
+    return localStorage.getItem(REMEMBER_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
+function store(remember: boolean): Storage | null {
+  try {
+    return remember ? localStorage : sessionStorage
+  } catch {
+    return null
+  }
+}
+
+function readToken(key: string): string {
+  // Checked in both places: flipping "remember" off must not strand a token
+  // that is still sitting in the other store from a previous visit.
+  try {
+    return localStorage.getItem(key) ?? sessionStorage.getItem(key) ?? ''
   } catch {
     return ''
   }
 }
 
-function writeToken(key: string, value: string): void {
+function writeToken(key: string, value: string, remember = readRemember()): void {
   try {
-    if (value) sessionStorage.setItem(key, value)
-    else sessionStorage.removeItem(key)
+    // Always clear both, so a token never lingers in the store that is no
+    // longer in use after the setting changes.
+    localStorage.removeItem(key)
+    sessionStorage.removeItem(key)
+    if (value) store(remember)?.setItem(key, value)
   } catch {
     /* storage unavailable in private modes; tokens simply do not persist */
+  }
+}
+
+export function setRemember(remember: boolean): void {
+  try {
+    localStorage.setItem(REMEMBER_KEY, remember ? '1' : '0')
+  } catch {
+    return
+  }
+  // Move any token already held into the newly chosen store.
+  for (const key of [VIEW_TOKEN_KEY, ADMIN_TOKEN_KEY]) {
+    const existing = readToken(key)
+    if (existing) writeToken(key, existing, remember)
   }
 }
 
