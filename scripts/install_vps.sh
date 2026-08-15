@@ -59,6 +59,12 @@ mkdir -p /etc/alpha-spy \
   /var/lib/alpha-spy/dojo \
   /var/log/alpha-spy
 
+# The installer runs under umask 077, so directories it creates default to
+# 700 root:root. The alphaspy service account must be able to traverse
+# /etc/alpha-spy to read the 640 root:alphaspy config and secrets inside it.
+chown root:alphaspy /etc/alpha-spy
+chmod 750 /etc/alpha-spy
+
 echo "[5/9] Installing the application wheel"
 rm -rf /opt/alpha-spy/venv
 python3 -m venv /opt/alpha-spy/venv
@@ -66,6 +72,14 @@ python3 -m venv /opt/alpha-spy/venv
 WHEEL="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'alpha_spy-*.whl' | head -n1)"
 [[ -n "$WHEEL" ]] || { echo "Wheel missing from dist/. Rebuild the package." >&2; exit 1; }
 /opt/alpha-spy/venv/bin/pip install "$WHEEL"
+
+# umask 077 also makes the venv (and /opt/alpha-spy itself) unreadable by the
+# alphaspy service account, which systemd then reports as "Failed to execute
+# /opt/alpha-spy/venv/bin/alpha-spy: Permission denied". Nothing under the
+# application tree is secret, so restore world read/traverse without touching
+# write bits.
+chmod a+rX /opt/alpha-spy
+chmod -R a+rX /opt/alpha-spy/venv /opt/alpha-spy/release
 
 echo "[6/9] Installing fail-closed configuration"
 cp "$ROOT_DIR/config/suite.yaml" /etc/alpha-spy/config.yaml
@@ -139,6 +153,12 @@ fi
 echo "[8/9] Validating configuration and database"
 set -a; source /etc/alpha-spy/secrets.env; set +a
 /opt/alpha-spy/venv/bin/alpha-spy --config /etc/alpha-spy/config.yaml doctor
+
+# doctor runs as root and initializes the journal/dashboard databases, leaving
+# root-owned files under /var/lib/alpha-spy that the alphaspy services cannot
+# open ("sqlite3.OperationalError: unable to open database file"). Re-assert
+# service-account ownership after the root validation pass.
+chown -R alphaspy:alphaspy /var/lib/alpha-spy /var/log/alpha-spy
 
 echo "[9/9] Starting Alpha-SPY"
 systemctl enable --now alpha-spy.target
