@@ -132,7 +132,7 @@ class StreamingMarketService(MarketService):
                             json.dumps(
                                 {
                                     "symbols": symbols,
-                                    "filter": ["quote", "trade", "timesale", "summary"],
+                                    "filter": ["quote", "timesale", "summary"],
                                     "sessionid": session_id,
                                     "linebreak": True,
                                     "validOnly": True,
@@ -329,11 +329,15 @@ class StreamingMarketService(MarketService):
                 )
                 self._record_quote_micro(symbol, current)
             elif event_type in {"trade", "tradex"}:
+                # Last-price/volume only. Tradier's trade and timesale families
+                # describe the same print; counting both double-counts
+                # buy/sell volume and OFI. Canonical prints are timesales.
                 self._set_float(current, "price", event.get("price") or event.get("last"))
                 self._set_float(current, "volume", event.get("cvol"))
                 current["quote_timestamp"] = _event_timestamp(event.get("date"))
-                self._record_trade_micro(symbol, current, event)
             elif event_type == "timesale":
+                if event.get("cancel") or event.get("correction"):
+                    continue
                 self._set_float(current, "price", event.get("last"))
                 self._set_float(current, "bid", event.get("bid"))
                 self._set_float(current, "ask", event.get("ask"))
