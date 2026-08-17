@@ -81,7 +81,7 @@ class TradierReadOnlyClient:
         return str(session_id)
 
     async def market_stream(self, symbols: list[str]) -> AsyncIterator[dict[str, Any]]:
-        """Yield quote/trade/timesale events with reconnect and backoff."""
+        """Yield quote/timesale/summary events with reconnect and backoff."""
         if self.settings.tradier_env == "sandbox":
             endpoint = "wss://sandbox-ws.tradier.com/v1/markets/events"
         else:
@@ -93,7 +93,7 @@ class TradierReadOnlyClient:
                 async with websockets.connect(endpoint, compression=None, ping_interval=20, ping_timeout=20) as ws:
                     request = {
                         "symbols": symbols,
-                        "filter": ["quote", "trade", "timesale", "summary"],
+                        "filter": ["quote", "timesale", "summary"],
                         "sessionid": session_id,
                         "linebreak": True,
                         "validOnly": True,
