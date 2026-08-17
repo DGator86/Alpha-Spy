@@ -8,6 +8,7 @@ import numpy as np
 
 from .config import SuiteConfig
 from .db import Journal
+from .session_tape import distance_bps, resolve_session_open_spy
 from .timeutil import ET
 
 
@@ -351,6 +352,9 @@ def build_market_context(
     large_trade_ratio = float(spy_micro.get("large_trade_ratio") or 0.0)
 
     internal = _internal_market_signals(journal, snapshot, quotes)
+    session_open = resolve_session_open_spy(journal, snapshot)
+    spot = float(snapshot.get("spy_price") or 0.0)
+    session_open_distance_bps = distance_bps(spot, session_open)
     signals = {
         "risk_beta_spread": 0.5 * ((qqq - spy) + (iwm - spy)),
         "large_small_spread": qqq - iwm,
@@ -365,6 +369,8 @@ def build_market_context(
         "order_flow_imbalance": order_flow_imbalance,
         "average_spread_bps": spread_bps,
         "large_trade_ratio": large_trade_ratio,
+        "session_open_price": session_open,
+        "session_open_distance_bps": session_open_distance_bps,
         "futures_representation": "cash_proxies_SPY_QQQ_IWM",
         "rates_representation": "Treasury_ETF_proxies_SHY_IEF_TLT",
         **internal,

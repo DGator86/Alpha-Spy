@@ -1,0 +1,5 @@
+[Unit]
+Description=Prune Alpha-SPY capture data
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alpha-spy-prune

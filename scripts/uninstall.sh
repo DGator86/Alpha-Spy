@@ -5,5 +5,5 @@ systemctl disable --now alpha-spy.target alpha-spy-dojo.timer alpha-spy-backup.t
 rm -f /etc/systemd/system/alpha-spy*.service /etc/systemd/system/alpha-spy*.timer /etc/systemd/system/alpha-spy.target
 systemctl daemon-reload
 rm -rf /opt/alpha-spy
-rm -f /usr/local/sbin/alpha-spy-backup
+rm -f /usr/local/sbin/alpha-spy-backup /usr/local/sbin/alpha-spy-prune /usr/local/sbin/alpha-spy-ordinary-calendar
 echo "Software removed. /var/lib/alpha-spy and /etc/alpha-spy were preserved."
