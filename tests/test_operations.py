@@ -150,7 +150,12 @@ def test_target_pulls_in_every_long_running_service():
 @pytest.mark.parametrize("unit", SERVICE_UNITS, ids=lambda p: p.name)
 def test_units_launch_only_installed_binaries(unit):
     """ExecStart must match what install_vps.sh actually puts on disk."""
-    installed = {"/opt/alpha-spy/venv/bin/alpha-spy", "/usr/local/sbin/alpha-spy-backup"}
+    installed = {
+        "/opt/alpha-spy/venv/bin/alpha-spy",
+        "/usr/local/sbin/alpha-spy-backup",
+        "/usr/local/sbin/alpha-spy-prune",
+        "/usr/local/sbin/alpha-spy-ordinary-calendar",
+    }
     for line in unit.read_text(encoding="utf-8").splitlines():
         if line.startswith("ExecStart="):
             binary = line.split("=", 1)[1].split()[0].lstrip("-@+!:")

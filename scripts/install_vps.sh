@@ -23,6 +23,7 @@ ALPHA_SPY_UNITS=(
   alpha-spy-validation
   alpha-spy-event-calendar
   alpha-spy-backup
+  alpha-spy-prune
 )
 
 echo "[1/9] Installing Ubuntu dependencies"
@@ -38,7 +39,7 @@ systemctl stop alpha-spy.target 2>/dev/null || true
 for unit in "${ALPHA_SPY_UNITS[@]}"; do
   systemctl stop "$unit.service" 2>/dev/null || true
 done
-for timer in alpha-spy-dojo.timer alpha-spy-validation.timer alpha-spy-event-calendar.timer alpha-spy-backup.timer; do
+for timer in alpha-spy-dojo.timer alpha-spy-validation.timer alpha-spy-event-calendar.timer alpha-spy-backup.timer alpha-spy-prune.timer; do
   systemctl stop "$timer" 2>/dev/null || true
 done
 pkill -TERM -f '/opt/alpha-spy/venv/bin/alpha-spy' 2>/dev/null || true
@@ -126,6 +127,10 @@ echo "[7/9] Installing services and backup tooling"
 cp "$ROOT_DIR"/systemd/* /etc/systemd/system/
 cp "$ROOT_DIR/scripts/alpha-spy-backup" /usr/local/sbin/alpha-spy-backup
 chmod 700 /usr/local/sbin/alpha-spy-backup
+cp "$ROOT_DIR/scripts/prune_capture.sh" /usr/local/sbin/alpha-spy-prune
+chmod 700 /usr/local/sbin/alpha-spy-prune
+cp "$ROOT_DIR/scripts/ordinary_calendar.py" /usr/local/sbin/alpha-spy-ordinary-calendar
+chmod 755 /usr/local/sbin/alpha-spy-ordinary-calendar
 systemctl daemon-reload
 systemctl enable alpha-spy.target alpha-spy-dojo.timer alpha-spy-validation.timer
 

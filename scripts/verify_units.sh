@@ -19,6 +19,8 @@ cd "$ROOT_DIR"
 INSTALLED_BINARIES=(
   /opt/alpha-spy/venv/bin/alpha-spy
   /usr/local/sbin/alpha-spy-backup
+  /usr/local/sbin/alpha-spy-prune
+  /usr/local/sbin/alpha-spy-ordinary-calendar
 )
 
 echo "==> Checking ExecStart paths against what the installer creates"
