@@ -152,7 +152,9 @@ class StreamingMarketService(MarketService):
                             if now_mono >= next_snapshot:
                                 started = time.perf_counter()
                                 snapshot_id = self._persist_snapshot(holdings, client)
-                                self._refresh_option_context(holdings, client, snapshot_id)
+                                session_open = str(self._exchange_state).lower() in {"open", "pre"}
+                                if session_open:
+                                    self._refresh_option_context(holdings, client, snapshot_id)
                                 self.journal.set_control("market_ready_snapshot_id", snapshot_id)
                                 latency = (time.perf_counter() - started) * 1000.0
                                 age = self._stream_age_seconds()
@@ -163,7 +165,10 @@ class StreamingMarketService(MarketService):
                                     latency,
                                     f"stream snapshot={snapshot_id} age={age:.1f}s events={self._stream_event_count}",
                                 )
-                                next_snapshot = now_mono + self.config.market.stream_snapshot_interval_seconds
+                                interval = self.config.market.stream_snapshot_interval_seconds
+                                if not session_open:
+                                    interval = max(interval, 300)
+                                next_snapshot = now_mono + interval
             except (ConnectionClosed, OSError, RuntimeError, ValueError) as exc:
                 self.journal.heartbeat("market", "ERROR", None, str(exc))
                 self.journal.alert("critical", "Tradier production stream disconnected", str(exc), "market")
