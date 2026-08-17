@@ -1,0 +1,7 @@
+[Unit]
+Description=Nightly Alpha-SPY data retention
+[Timer]
+OnCalendar=*-*-* 22:15:00 UTC
+Persistent=true
+[Install]
+WantedBy=timers.target
