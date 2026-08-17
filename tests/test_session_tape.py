@@ -82,6 +82,72 @@ def test_put_survives_15m_horizon_while_open_unreclaimed() -> None:
     assert decision.reason is None
 
 
+class _FakeCursor:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConnection:
+    def __init__(self, row):
+        self._row = row
+
+    def execute(self, _sql, _params):
+        return _FakeCursor(self._row)
+
+
+class _FakeJournal:
+    def __init__(self, row=None, cached=""):
+        self._row = row
+        self.control = {"rth_open_spy:2026-08-17": cached} if cached else {}
+
+    def get_control(self, key, default=""):
+        return self.control.get(key, default)
+
+    def set_control(self, key, value):
+        self.control[key] = value
+
+    def session(self):
+        journal = self
+
+        class _Ctx:
+            def __enter__(self):
+                return _FakeConnection(journal._row)
+
+            def __exit__(self, *_args):
+                return False
+
+        return _Ctx()
+
+
+def test_mid_session_snapshot_does_not_become_the_open() -> None:
+    from alpha_spy.session_tape import resolve_session_open_spy
+
+    journal = _FakeJournal()
+    snapshot = {
+        "captured_at": "2026-08-17T18:50:00Z",
+        "spy_price": 773.78,
+        "exchange_state": "open",
+    }
+    assert resolve_session_open_spy(journal, snapshot) is None
+    assert "rth_open_spy:2026-08-17" not in journal.control
+
+
+def test_opening_print_is_cached_from_journal() -> None:
+    from alpha_spy.session_tape import resolve_session_open_spy
+
+    journal = _FakeJournal(row=(776.22,))
+    snapshot = {
+        "captured_at": "2026-08-17T18:50:00Z",
+        "spy_price": 773.78,
+        "exchange_state": "open",
+    }
+    assert resolve_session_open_spy(journal, snapshot) == pytest.approx(776.22)
+    assert journal.control["rth_open_spy:2026-08-17"] == "776.220000"
+
+
 def test_horizon_exit_still_fires_without_session_bias() -> None:
     now = datetime(2026, 8, 10, 15, 0, tzinfo=UTC)
     signal = PositionSignal(forecast_return=0.001, breadth=0.60, iv_edge_gap=0.0, spot=100.10)

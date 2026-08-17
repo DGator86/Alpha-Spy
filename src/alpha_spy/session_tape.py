@@ -121,9 +121,12 @@ def resolve_session_open_spy(journal: Any, snapshot: dict[str, Any]) -> float | 
         price = float(row[0])
         journal.set_control(key, f"{price:.6f}")
         return price
-    price = float(snapshot.get("spy_price") or 0.0)
-    state = str(snapshot.get("exchange_state") or "").lower()
-    if price > 0 and state == "open":
-        journal.set_control(key, f"{price:.6f}")
-        return price
+    # Only the first five minutes may seed the open from the live print.
+    # A mid-session restart must not rewrite 9:30 as the 2pm price.
+    if minutes_from_open <= 5:
+        price = float(snapshot.get("spy_price") or 0.0)
+        state = str(snapshot.get("exchange_state") or "").lower()
+        if price > 0 and state == "open":
+            journal.set_control(key, f"{price:.6f}")
+            return price
     return None
