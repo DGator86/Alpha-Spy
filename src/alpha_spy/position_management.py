@@ -5,6 +5,7 @@ from datetime import datetime, time
 from math import isfinite
 from typing import Any
 
+from .session_tape import distance_bps, session_agrees_with_direction
 from .timeutil import ET
 
 
@@ -14,6 +15,8 @@ class PositionSignal:
     breadth: float
     iv_edge_gap: float
     spot: float
+    session_open: float = 0.0
+    vwap_distance_bps: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -222,7 +225,13 @@ def evaluate_position(
             and pnl > 0.20 * debit
         ):
             reason = "directional_move_complete"
-        if reason is None and progress >= 0.58 and mfe < 0.18 * debit and pnl < -0.05 * debit:
+        if (
+            reason is None
+            and progress >= 0.58
+            and mfe < 0.18 * debit
+            and pnl < -0.05 * debit
+            and not session_agrees_with_direction(direction, distance_bps(signal.spot, signal.session_open))
+        ):
             reason = "directional_time_stop"
 
     elif family in {"long_vol", "convex_tail"}:
@@ -293,10 +302,15 @@ def evaluate_position(
         if pnl < 0.30 * risk_basis or abs(signal.forecast_return) < 0.00025:
             reason = "late_session_risk_reduction"
 
-    # The alpha forecast has a defined horizon. Do not silently transform a 15-minute
-    # thesis into an all-day hold just because neither a target nor a stop fired.
+    # 15-minute forecasts still get a hard horizon exit unless the cash session
+    # is still working in the position's favor (open unreclaimed on a grind).
     if reason is None and elapsed >= horizon:
-        reason = "forecast_horizon_exit"
+        open_bps = distance_bps(signal.spot, signal.session_open)
+        if not (
+            family == "directional_long"
+            and session_agrees_with_direction(direction, open_bps)
+        ):
+            reason = "forecast_horizon_exit"
 
     state = {
         "evaluated_at": now.isoformat(),

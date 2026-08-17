@@ -16,6 +16,7 @@ from .prediction import create_prediction_bundle
 from .regime import estimate_dealer_gamma_proxy, estimate_option_activity_proxy
 from .risk import AccountState, choose_decision, no_trade_decision, parse_account_state
 from .services import EngineService, SettlementService, StopFlag, append_jsonl, sleep_interruptible
+from .session_tape import resolve_session_open_spy
 from .strategy import generate_candidates
 from .timeutil import ET, at_or_after_et, et_now, utc_iso, utc_now
 from .tradier import TradierClient, TradierError, preview_fees
@@ -490,11 +491,19 @@ class HardenedSettlementService(SettlementService):
             if spy_iv is not None and constituent_iv is not None
             else 0.0
         )
+        context_signals = (prediction.get("payload") or {}).get("market_context", {}).get("signals", {})
+        if not isinstance(context_signals, dict):
+            context_signals = {}
+        session_open = float(context_signals.get("session_open_price") or 0.0)
+        if session_open <= 0:
+            session_open = float(resolve_session_open_spy(self.journal, snapshot) or 0.0)
         signal = PositionSignal(
             forecast_return=float(prediction.get("expected_return") or 0.0),
             breadth=float(feature.get("breadth") or 0.5),
             iv_edge_gap=iv_edge_gap,
             spot=float(snapshot.get("spy_price") or 0.0),
+            session_open=session_open,
+            vwap_distance_bps=float(context_signals.get("auction_vwap_distance_bps") or 0.0),
         )
         management = evaluate_position(position, now=now, pnl=pnl, mfe=mfe, signal=signal)
 
