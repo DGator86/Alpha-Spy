@@ -45,13 +45,10 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Two explicit patterns rather than "static/**/*". setuptools expands these with
-# glob, and `**` only recurses when glob is called with recursive=True — which
-# older setuptools does not do. Without it, "static/**/*" behaves like
-# "static/*/*": it matches static/assets/* but silently MISSES static/index.html,
-# producing a wheel with the scripts and no page to load them. Listing both
-# levels explicitly is correct under either behaviour.
-"alpha_spy.dashboard" = ["static/*", "static/assets/*"]
+# MANIFEST.in recursive-include is the source of truth. These patterns are the
+# fallback when a VPS `pip install --no-deps .` would otherwise ship index.html
+# and drop static/assets/*. That happened on 82.29.155.71.
+"alpha_spy.dashboard" = ["static/*", "static/assets/*", "static/assets/*.js", "static/assets/*.css"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
