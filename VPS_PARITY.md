@@ -1,13 +1,8 @@
 # VPS parity
 
-There are two Hostinger boxes. They are not interchangeable.
+The trading box is **srv1874660 / `82.29.155.71`**. Full Alpha stack (market, engine, decision, settlement, confirmation, dashboard) plus Beta. Overlay and restart only here.
 
-| Host | Address | Role |
-| --- | --- | --- |
-| **srv1874660** | **`82.29.155.71`** | **Boston trading VPS.** Full Alpha stack (market, engine, decision, settlement, confirmation, dashboard) plus Beta. This is the machine to overlay and restart. |
-| srv1575978 | IPv6 `2a02:4780:75:cbfb::1` (`ssh vps` in some agent environments) | Separate clone. Do not treat `ssh vps` as Boston. |
-
-`ssh vps` in the cloud-agent environment currently lands on **srv1575978**, not 82.29.155.71. Always target `root@82.29.155.71` with `~/.ssh/vps_key` for trading work.
+The clone **srv1575978 / `2.24.28.77`** was destroyed. Do not SSH there. `ssh vps` in this environment must resolve to `82.29.155.71`.
 
 Deploy Alpha with a surgical overlay into `/opt/alpha-spy/release` and the venv (`pip install --no-deps .`), then restart the service that loaded the module. Do not `git pull` / `git reset` the dirty release tree. Do not run `deploy_vps.sh`.
 
