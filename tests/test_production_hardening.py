@@ -193,6 +193,14 @@ def test_five_minute_entry_grid_is_deterministic(tmp_path: Path) -> None:
     assert _on_entry_grid(config, "2026-08-10T13:41:17Z") is False
 
 
+def test_tradier_treats_string_null_collections_as_empty() -> None:
+    """Tradier returns the string 'null' for empty orders/positions/quotes."""
+    assert TradierClient._object("null") == {}
+    assert TradierClient._object(None) == {}
+    assert TradierClient._as_list(TradierClient._object("null").get("order")) == []
+    assert TradierClient._as_list(TradierClient._object({"order": {"id": 1}}).get("order")) == [{"id": 1}]
+
+
 def test_tradier_change_endpoint_refuses_multileg_debit_type(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     config.tradier.access_token = SecretStr("x")

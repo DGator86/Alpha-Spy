@@ -14,7 +14,8 @@ Deploy Alpha with a surgical overlay into `/opt/alpha-spy/release` and the venv 
 Live production fixes that Boston was missing (engine dead since 2026-08-12):
 
 - pandas 3 copy-on-write crash in `distributions.py` (`corr.values` is read-only; use `to_numpy(copy=True)`)
-- `INSERT OR REPLACE` on `features` so a retried engine cycle does not UNIQUE-fail after a mid-cycle crash
+- `INSERT OR REPLACE` on engine journal rows (`features`, `predictions`, `candidates`, `decisions`) so a retried cycle does not UNIQUE-fail after a mid-cycle crash
+- Tradier empty `orders`/`positions`/`quotes` payloads are the string `"null"`; treat non-objects as empty so broker reconciliation cannot take down the engine
 - off-hours 500-name tape capture skip in `services.py` / `streaming_market.py`
 - rolling ordinary-session calendar (`scripts/ordinary_calendar.py`)
 - capture retention (`scripts/prune_capture.sh`)
