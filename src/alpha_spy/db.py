@@ -731,10 +731,14 @@ class Journal:
         return item
 
     def insert_features(self, feature: dict[str, Any]) -> None:
+        # INSERT OR REPLACE is required for crash recovery. If the engine dies
+        # after writing features but before last_engine_snapshot_id advances
+        # (pandas CoW did this on 82.29.155.71 for days), the next cycle must
+        # overwrite the same snapshot_id instead of UNIQUE-failing forever.
         with self.transaction() as con:
             con.execute(
                 """
-                INSERT INTO features(
+                INSERT OR REPLACE INTO features(
                     snapshot_id,created_at,breadth,weighted_pressure,concentration,dispersion,
                     correlation,downside_correlation,weighted_return,residual_pressure,
                     realized_vol,trust_score,health_state,payload_json
