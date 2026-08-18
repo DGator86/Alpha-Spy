@@ -6,6 +6,8 @@ The clone **srv1575978 / `2.24.28.77`** was destroyed. Do not SSH there. `ssh vp
 
 Deploy Alpha with a surgical overlay into `/opt/alpha-spy/release` and the venv (`pip install --no-deps .`), then restart the service that loaded the module. Do not `git pull` / `git reset` the dirty release tree. Do not run `deploy_vps.sh`.
 
+This box runs Alpha-SPY and Beta-spy only as application stacks. Docker / Iron-Spyder / containerd are masked. Tailscale stays up for remote access. Beta live unit uses `--warm-sessions 0` so the Tradier tape attaches immediately after restart (warmup would block the websocket for many minutes during RTH).
+
 Live production fixes that Boston was missing (engine dead since 2026-08-12):
 
 - pandas 3 copy-on-write crash in `distributions.py` (`corr.values` is read-only; use `to_numpy(copy=True)`)
