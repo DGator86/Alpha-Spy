@@ -11,7 +11,8 @@ from .context import MarketContext, build_market_context
 from .events import EventState, event_state_at
 from .execution import ExecutionManager
 from .features import compute_features
-from .position_management import PositionSignal, evaluate_position
+from .fail_safes import as_dict, build_position_signal, impulse_allows_off_grid, must_fail_safe_flatten
+from .position_management import evaluate_position
 from .prediction import create_prediction_bundle
 from .regime import estimate_dealer_gamma_proxy, estimate_option_activity_proxy
 from .risk import AccountState, choose_decision, no_trade_decision, parse_account_state
@@ -247,7 +248,9 @@ class HardenedEngineService(EngineService):
                 "broker_reconciliation_blocked",
                 payload={"reconciliation": reconciliation.as_dict()},
             )
-        elif not _on_entry_grid(self.config, snapshot["captured_at"]):
+        elif not _on_entry_grid(self.config, snapshot["captured_at"]) and not self._impulse_override(
+            snapshot
+        ):
             decision = no_trade_decision(
                 prediction,
                 feature,
@@ -256,11 +259,12 @@ class HardenedEngineService(EngineService):
                 payload={"entry_grid_minutes": self.config.risk.entry_grid_minutes},
             )
         else:
+            impulse = self._impulse_override(snapshot)
             local = _parse_iso(snapshot["captured_at"]).astimezone(ET)
             grid = max(1, int(self.config.risk.entry_grid_minutes))
             bucket_minute = local.minute - (local.minute % grid)
             bucket = local.replace(minute=bucket_minute, second=0, microsecond=0).isoformat()
-            if self.journal.get_control("last_entry_grid_bucket") == bucket:
+            if not impulse and self.journal.get_control("last_entry_grid_bucket") == bucket:
                 decision = no_trade_decision(
                     prediction,
                     feature,
@@ -269,7 +273,8 @@ class HardenedEngineService(EngineService):
                     payload={"entry_grid_bucket": bucket},
                 )
             else:
-                self.journal.set_control("last_entry_grid_bucket", bucket)
+                if not impulse:
+                    self.journal.set_control("last_entry_grid_bucket", bucket)
                 decision = choose_decision(
                     self.config,
                     self.journal,
@@ -279,6 +284,10 @@ class HardenedEngineService(EngineService):
                     account,
                     now=_parse_iso(snapshot["captured_at"]),
                 )
+                if impulse and decision["action"] in {"PAPER_ORDER", "SUBMIT_ORDER"}:
+                    self.journal.set_control(
+                        "last_impulse_entry_spot", str(float(snapshot.get("spy_price") or 0.0))
+                    )
         self.journal.insert_decision(decision)
 
         if decision["action"] in {"PAPER_ORDER", "SUBMIT_ORDER"} and decision.get("candidate_id"):
@@ -308,6 +317,17 @@ class HardenedEngineService(EngineService):
             },
         )
         return f"prediction={prediction['prediction_id']} action={decision['action']}"
+
+    def _impulse_override(self, snapshot: dict[str, Any]) -> bool:
+        high, low = self.journal.session_spy_extrema(str(snapshot.get("captured_at") or ""))
+        last = self.journal.get_control("last_impulse_entry_spot")
+        last_spot = float(last) if last else None
+        return impulse_allows_off_grid(
+            session_high=high,
+            session_low=low,
+            spot=float(snapshot.get("spy_price") or 0.0),
+            last_impulse_spot=last_spot,
+        )
 
     def _account_state(self) -> AccountState:
         session_date = et_now().date().isoformat()
@@ -387,6 +407,15 @@ class HardenedSettlementService(SettlementService):
             except Exception as exc:
                 self.journal.heartbeat("settlement", "ERROR", None, str(exc))
                 self.journal.alert("critical", "Settlement cycle failed", str(exc), "settlement")
+                try:
+                    self._fail_safe_recover(exc)
+                except Exception as inner:
+                    self.journal.alert(
+                        "critical",
+                        "Settlement watchdog flatten failed",
+                        str(inner),
+                        "settlement",
+                    )
             sleep_interruptible(flag, self.config.risk.exit_monitor_interval_seconds)
 
     def _held_leg_quotes(self, position: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
@@ -450,6 +479,77 @@ class HardenedSettlementService(SettlementService):
         return premium_pnl - entry_fees - estimated_exit_fees
 
     def run_once(self) -> str:
+        try:
+            return self._manage_open_position()
+        except Exception as exc:
+            return self._fail_safe_recover(exc)
+
+    def _fail_safe_recover(self, exc: Exception) -> str:
+        position = self.journal.open_position()
+        if not position:
+            return f"fail_safe_already_flat:{exc}"
+        payload = position.setdefault("payload", {})
+        errors = int(payload.get("management_error_count") or 0) + 1
+        payload["management_error_count"] = errors
+        payload["last_management_error"] = str(exc)[:2000]
+        payload["unmanageable"] = errors >= 3
+        now = utc_now()
+        opened_at = None
+        try:
+            opened_at = _parse_iso(str(position.get("opened_at") or ""))
+        except Exception:
+            opened_at = None
+        flatten = must_fail_safe_flatten(
+            now=now,
+            forced_flat_time_et=self.config.risk.forced_flat_time_et,
+            error_count=errors,
+            flatten_requested=self.journal.get_control("flatten_requested", "false").lower()
+            == "true",
+            opened_at=opened_at,
+        )
+        self.journal.upsert_position(position)
+        self.journal.alert(
+            "critical",
+            "Settlement fail-safe engaged",
+            str(exc),
+            "settlement",
+            {"errors": errors, "flatten": flatten, "position_id": position.get("position_id")},
+        )
+        if not flatten:
+            return f"management_error={errors}"
+        return self._local_force_close(position, "fail_safe_flatten")
+
+    def _local_force_close(self, position: dict[str, Any], reason: str) -> str:
+        now = utc_now()
+        try:
+            if BrokerReconciler(self.config, self.journal).broker_mode:
+                self.config.assert_broker_submission_safe()
+                self._close_live_authoritative(position, current_value=None, force_market=True)
+        except Exception as exc:
+            self.journal.alert(
+                "critical",
+                "Fail-safe broker flatten failed; closing local book",
+                str(exc),
+                "settlement",
+            )
+        clock_flat = at_or_after_et(now, self.config.risk.forced_flat_time_et) or at_or_after_et(
+            now, "16:00"
+        )
+        if self.config.trading.paper_mode or clock_flat:
+            position.update(
+                {
+                    "status": "CLOSED",
+                    "closed_at": utc_iso(),
+                    "exit_reason": reason,
+                    "unrealized_pnl": 0.0,
+                    "realized_pnl": float(position.get("unrealized_pnl") or 0.0),
+                }
+            )
+            self.journal.set_control("flatten_requested", "false")
+            self.journal.upsert_position(position)
+        return reason
+
+    def _manage_open_position(self) -> str:
         position = self.journal.open_position()
         if not position:
             reconciliation = BrokerReconciler(self.config, self.journal).check(None)
@@ -479,10 +579,12 @@ class HardenedSettlementService(SettlementService):
 
         mfe = max(float(position.get("mfe") or 0.0), pnl)
         mae = min(float(position.get("mae") or 0.0), pnl)
-        snapshot = self.journal.latest_snapshot() or {}
-        feature = self.journal.latest_features() or {}
-        prediction = self.journal.latest_prediction_for_horizon("15m") or self.journal.latest_prediction() or {}
-        surface = feature.get("payload", {}).get("surface", {})
+        snapshot = as_dict(self.journal.latest_snapshot())
+        feature = as_dict(self.journal.latest_features())
+        prediction = as_dict(
+            self.journal.latest_prediction_for_horizon("15m") or self.journal.latest_prediction()
+        )
+        surface = as_dict(as_dict(feature.get("payload")).get("surface"))
         spy_iv = surface.get("spy_iv")
         constituent_iv = surface.get("constituent_iv")
         iv_edge_gap = (
@@ -490,11 +592,12 @@ class HardenedSettlementService(SettlementService):
             if spy_iv is not None and constituent_iv is not None
             else 0.0
         )
-        signal = PositionSignal(
+        signal = build_position_signal(
             forecast_return=float(prediction.get("expected_return") or 0.0),
             breadth=float(feature.get("breadth") or 0.5),
             iv_edge_gap=iv_edge_gap,
             spot=float(snapshot.get("spy_price") or 0.0),
+            session_open=float(snapshot.get("session_open") or snapshot.get("spy_price") or 0.0),
         )
         management = evaluate_position(position, now=now, pnl=pnl, mfe=mfe, signal=signal)
 

@@ -5,10 +5,11 @@ import sqlite3
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 
-from .timeutil import utc_iso
+from .timeutil import ET, utc_iso
 
 SCHEMA = r"""
 PRAGMA journal_mode=WAL;
@@ -1022,6 +1023,37 @@ class Journal:
         item = dict(row)
         item["payload"] = json.loads(item.pop("payload_json") or "{}")
         return item
+
+    def session_spy_extrema(self, captured_at: str) -> tuple[float | None, float | None]:
+        """High/low SPY prints for the ET session of `captured_at` (RTH only)."""
+        try:
+            as_of = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00")).astimezone(ET)
+        except (TypeError, ValueError):
+            return None, None
+        session = as_of.date()
+        rth_open = time(9, 30)
+        with self.session() as con:
+            rows = con.execute(
+                """
+                SELECT captured_at, spy_price FROM market_snapshots
+                WHERE spy_price IS NOT NULL
+                ORDER BY captured_at DESC LIMIT 800
+                """
+            ).fetchall()
+        prices: list[float] = []
+        for row in rows:
+            try:
+                stamp = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00")).astimezone(ET)
+            except (TypeError, ValueError):
+                continue
+            if stamp.date() != session:
+                continue
+            if stamp.time().replace(tzinfo=None) < rth_open:
+                continue
+            prices.append(float(row[1]))
+        if not prices:
+            return None, None
+        return max(prices), min(prices)
 
     def latest_snapshot(self) -> dict[str, Any] | None:
         with self.session() as con:

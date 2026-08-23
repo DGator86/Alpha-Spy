@@ -268,7 +268,7 @@ class StrategyConfig(BaseModel):
     max_relative_spread: float = 0.35
     min_credit: float = 0.10
     max_debit: float = 3.50
-    max_width: float = 10.0
+    max_width: float = 3.5
     min_edge_dollars: float = 0.03
     min_probability: float = 0.60
     max_candidates_per_cycle: int = 40
@@ -288,7 +288,7 @@ class StrategyConfig(BaseModel):
 
 class RiskConfig(BaseModel):
     maximum_contracts: int = Field(default=1, ge=1, le=1)
-    maximum_trades_per_day: int = Field(default=1, ge=0)
+    maximum_trades_per_day: int = Field(default=8, ge=0)
     maximum_trade_risk_dollars: float = Field(default=100.0, ge=0.0)
     account_risk_fraction: float = Field(default=0.0025, ge=0.0, le=1.0)
     daily_loss_limit_dollars: float = Field(default=200.0, ge=0.0)
@@ -297,7 +297,7 @@ class RiskConfig(BaseModel):
     orange_risk_multiplier: float = Field(default=0.25, ge=0.0, le=1.0)
     forced_flat_time_et: str = "15:55"
     entry_start_time_et: str = "09:40"
-    entry_stop_time_et: str = "15:15"
+    entry_stop_time_et: str = "15:40"
     entry_grid_minutes: int = Field(default=5, ge=1, le=60)
     exit_monitor_interval_seconds: int = Field(default=60, ge=5, le=300)
     block_on_incomplete_universe: bool = True
@@ -426,6 +426,15 @@ class SuiteConfig(BaseModel):
                 "minimum_slippage": self.trading.minimum_slippage,
                 "force_market_exit_after_limit_failure": self.trading.force_market_exit_after_limit_failure,
             },
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+        return hashlib.sha256(encoded).hexdigest()
+
+    def calibration_fingerprint(self) -> str:
+        """Stable key for walk-forward samples. Risk/window yaml must not wipe it."""
+        payload = {
+            "model_version": self.prediction.model_version,
+            "prediction": self.prediction.model_dump(mode="json"),
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
         return hashlib.sha256(encoded).hexdigest()

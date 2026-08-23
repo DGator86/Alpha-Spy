@@ -14,6 +14,7 @@ class PositionSignal:
     breadth: float
     iv_edge_gap: float
     spot: float
+    session_open: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,14 @@ def _opened_at(position: dict[str, Any]) -> datetime:
 
 
 def _entry_context(position: dict[str, Any]) -> dict[str, Any]:
-    return position.get("payload", {}).get("candidate", {}).get("payload", {})
+    payload = position.get("payload")
+    if not isinstance(payload, dict):
+        return {}
+    candidate = payload.get("candidate")
+    if not isinstance(candidate, dict):
+        return {}
+    inner = candidate.get("payload")
+    return inner if isinstance(inner, dict) else {}
 
 
 def evaluate_position(
@@ -135,13 +143,17 @@ def evaluate_position(
 
     short_put, long_put, short_call, long_call = _wing_geometry(position)
 
+    entry_spot = float(candidate_payload.get("entry_spot") or signal.spot)
+
     if entry_kind == "credit":
         if family == "short_vol" or "IRON_CONDOR" in strategy or "IRON_BUTTERFLY" in strategy:
             target_fraction = 0.45 if progress < 0.50 else 0.58
             target_pnl = max(2.50, target_fraction * credit)
             stop_amount = min(0.24 * max_loss, max(1.15 * credit, 0.10 * max_loss))
             stop_pnl = -stop_amount
-            if pnl >= target_pnl:
+            if abs(signal.spot - entry_spot) >= 1.40:
+                reason = "range_impulse_abort"
+            elif pnl >= target_pnl:
                 reason = "range_profit_target"
             elif pnl <= stop_pnl:
                 reason = "range_tail_stop"
@@ -210,7 +222,6 @@ def evaluate_position(
             reason = "direction_thesis_invalidation"
         if reason is None and elapsed >= 10 and signal.iv_edge_gap < -0.0025 and pnl <= 0.05 * debit:
             reason = "long_premium_edge_invalidation"
-        entry_spot = float(candidate_payload.get("entry_spot") or signal.spot)
         sigma = max(float(candidate_payload.get("forecast_sigma_return") or 0.0), 1e-6)
         expected_move = max(entry_spot * sigma, 0.25)
         favorable_move = direction * (signal.spot - entry_spot) if direction else abs(signal.spot - entry_spot)
@@ -242,7 +253,6 @@ def evaluate_position(
         if reason is None and elapsed >= 10 and signal.iv_edge_gap < -0.0010 and abs(signal.forecast_return) < 0.00045 and pnl <= 0.05 * debit:
             reason = "volatility_thesis_invalidation"
             thesis_valid = False
-        entry_spot = float(candidate_payload.get("entry_spot") or signal.spot)
         sigma = max(float(candidate_payload.get("forecast_sigma_return") or 0.0), 1e-6)
         expected_move = max(entry_spot * sigma, 0.25)
         if reason is None and abs(signal.spot - entry_spot) / expected_move >= 1.10 and signal.iv_edge_gap <= 0.0 and pnl > 0.25 * debit:
@@ -288,15 +298,22 @@ def evaluate_position(
                 reason = "conditional_profit_trail"
 
     local_time = now.astimezone(ET).time().replace(tzinfo=None)
-    if reason is None and local_time >= time(15, 48):
+    if reason is None and local_time >= time(15, 50):
+        if family == "short_vol" or "IRON_CONDOR" in strategy or "IRON_BUTTERFLY" in strategy:
+            reason = "close_probe_exit"
+    if reason is None and local_time >= time(15, 55):
+        reason = "forced_flat_time"
+    elif reason is None and local_time >= time(15, 48):
         risk_basis = max(debit, credit, 1.0)
         if pnl < 0.30 * risk_basis or abs(signal.forecast_return) < 0.00025:
             reason = "late_session_risk_reduction"
 
-    # The alpha forecast has a defined horizon. Do not silently transform a 15-minute
-    # thesis into an all-day hold just because neither a target nor a stop fired.
+    # Do not chop a working directional into a 15-minute scalp. Horizon is
+    # only a dead-trade stop; trail / move-complete / close probe handle winners.
     if reason is None and elapsed >= horizon:
-        reason = "forecast_horizon_exit"
+        working = family == "directional_long" and mfe >= 0.18 * max(debit, 1.0) and pnl >= 0.0
+        if not working:
+            reason = "forecast_horizon_exit"
 
     state = {
         "evaluated_at": now.isoformat(),

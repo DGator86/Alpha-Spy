@@ -186,6 +186,11 @@ def test_professional_stop_tightens_and_horizon_is_hard_exit() -> None:
     assert horizon.should_exit is True
     assert horizon.reason == "forecast_horizon_exit"
 
+    running = evaluate_position(
+        _position(now - timedelta(minutes=16)), now=now, pnl=40.0, mfe=45.0, signal=signal
+    )
+    assert running.should_exit is False
+
 
 def test_five_minute_entry_grid_is_deterministic(tmp_path: Path) -> None:
     config = make_config(tmp_path)

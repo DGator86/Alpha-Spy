@@ -7,6 +7,7 @@ from typing import Any
 
 from .config import SuiteConfig
 from .db import Journal
+from .fail_safes import MANAGEMENT_ERROR_FLATTEN
 from .timeutil import ET, in_et_window, utc_iso, utc_now
 
 
@@ -179,8 +180,13 @@ def choose_decision(
         reason = f"health_{health_state.lower()}"
     elif risk <= 0:
         reason = "zero_allowed_risk"
-    elif journal.open_position() is not None:
-        reason = "managed_position_already_open"
+    elif (open_position := journal.open_position()) is not None:
+        errors = int(open_position.get("payload", {}).get("management_error_count") or 0)
+        if errors >= MANAGEMENT_ERROR_FLATTEN:
+            journal.set_control("flatten_requested", "true")
+            reason = "managed_position_unmanageable"
+        else:
+            reason = "managed_position_already_open"
     else:
         eligible = [
             c

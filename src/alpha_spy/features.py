@@ -28,7 +28,30 @@ def compute_features(
         and float(q.get("weight", 0.0)) > 0
     ]
     if not constituents:
-        raise RuntimeError("No constituent quotes available for feature computation")
+        return {
+            "snapshot_id": snapshot["snapshot_id"],
+            "created_at": utc_iso(),
+            "breadth": 0.5,
+            "weighted_pressure": 0.0,
+            "concentration": 1.0,
+            "dispersion": 0.0,
+            "correlation": None,
+            "downside_correlation": None,
+            "weighted_return": 0.0,
+            "residual_pressure": 0.0,
+            "realized_vol": config.prediction.min_sigma_return,
+            "trust_score": 0.0,
+            "health_state": "RED",
+            "payload": {
+                "constituent_count": 0,
+                "covered_weight": float(snapshot.get("covered_weight", 0.0)),
+                "stale_fraction": 1.0,
+                "spy_session_return": 0.0,
+                "top_attribution": [],
+                "surface": {},
+                "fail_closed_reason": "no_constituent_quotes",
+            },
+        }
 
     weights = np.asarray([float(q.get("weight", 0.0)) for q in constituents], dtype=float)
     returns = np.asarray([float(q.get("change_pct") or 0.0) for q in constituents], dtype=float)

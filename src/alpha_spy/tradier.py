@@ -12,7 +12,16 @@ from .config import SuiteConfig
 
 
 class TradierError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        body: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
 
 
 @dataclass
@@ -105,16 +114,31 @@ class TradierClient:
                         wait = max(wait, self.rate_state.expiry_ms / 1000 - time.time() + 0.25)
                     time.sleep(max(0.25, wait))
                     continue
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    body = (response.text or "")[:4000]
+                    last_error = TradierError(
+                        f"Tradier {response.status_code} {method} {path}: {body}",
+                        status_code=response.status_code,
+                        body=body,
+                    )
+                    if 400 <= response.status_code < 500 and response.status_code != 429:
+                        if attempt >= 2:
+                            break
+                    elif attempt >= retries:
+                        break
+                    time.sleep(min(8.0, 0.5 * 2 ** (attempt - 1)))
+                    continue
                 payload = response.json()
                 if isinstance(payload, dict) and payload.get("errors"):
-                    raise TradierError(str(payload["errors"]))
+                    raise TradierError(str(payload["errors"]), body=str(payload["errors"]))
                 return payload if isinstance(payload, dict) else {"data": payload}
             except (httpx.HTTPError, ValueError, TradierError) as exc:
                 last_error = exc
                 if attempt >= retries:
                     break
                 time.sleep(min(8.0, 0.5 * 2 ** (attempt - 1)))
+        if isinstance(last_error, TradierError):
+            raise last_error
         raise TradierError(f"Tradier request failed {method} {path}: {last_error}")
 
     @staticmethod
@@ -148,7 +172,10 @@ class TradierClient:
         if not self.account_id:
             return []
         payload = self.request("GET", f"/accounts/{self.account_id}/positions")
-        return self._as_list(payload.get("positions", {}).get("position") if payload.get("positions") else None)
+        block = payload.get("positions") if isinstance(payload, dict) else None
+        if not isinstance(block, dict):
+            return []
+        return self._as_list(block.get("position"))
 
     def orders(self, *, include_tags: bool = True, limit: int = 1000) -> list[dict[str, Any]]:
         if not self.account_id:
@@ -158,7 +185,10 @@ class TradierClient:
             f"/accounts/{self.account_id}/orders",
             params={"includeTags": str(bool(include_tags)).lower(), "limit": max(25, int(limit))},
         )
-        return self._as_list(payload.get("orders", {}).get("order") if payload.get("orders") else None)
+        block = payload.get("orders") if isinstance(payload, dict) else None
+        if not isinstance(block, dict):
+            return []
+        return self._as_list(block.get("order"))
 
     def order(self, order_id: str | int) -> dict[str, Any]:
         payload = self.request(

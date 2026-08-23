@@ -10,6 +10,7 @@ import numpy as np
 from scipy.stats import norm
 
 from .config import SuiteConfig
+from .fail_safes import prefer_defined_debits, reject_unsafe_condors
 from .timeutil import ET, utc_iso
 
 
@@ -335,6 +336,9 @@ def _evaluate_structure(
         if bearish and probability_up > 0.45:
             strategy_fit = False
             fit_reasons.append("bearish_probability_too_low")
+        if family == "directional_credit":
+            strategy_fit = False
+            fit_reasons.append("directional_credits_disabled_tape_policy")
     elif family == "short_vol":
         if q_vol <= p_vol * 1.03:
             strategy_fit = False
@@ -360,9 +364,17 @@ def _evaluate_structure(
     score = expected_value / max(max_loss, 1.0) + 0.25 * (probability_profit - 0.5)
     if pnl_std > 1e-9:
         score += 0.05 * expected_value / pnl_std
-    score -= 0.10 * uncertainty_ratio
-    score += 0.05 if strategy_fit else -0.25
-    score += 0.05 * q_executable_edge / max(max_loss, 1.0)
+        score -= 0.10 * uncertainty_ratio
+        score += 0.05 if strategy_fit else -0.25
+        score += 0.05 * q_executable_edge / max(max_loss, 1.0)
+        if name in {"CALL_DEBIT_SPREAD", "PUT_DEBIT_SPREAD"}:
+            structure_width = float(width or 0.0)
+            if 2.0 <= structure_width <= 3.5:
+                score += 0.08
+            elif structure_width > 5.0:
+                score -= 0.06
+        elif name in {"LONG_CALL", "LONG_PUT"}:
+            score -= 0.04
 
     accepted = (
         expected_value >= config.strategy.min_edge_dollars * 100.0
@@ -597,5 +609,7 @@ def generate_candidates(
                         width=max(left, right_width),
                     )
 
+    prefer_defined_debits(candidates)
+    reject_unsafe_condors(candidates, spot)
     candidates.sort(key=lambda c: c["score"], reverse=True)
     return candidates[: config.strategy.max_candidates_per_cycle]

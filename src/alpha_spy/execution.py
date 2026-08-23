@@ -6,6 +6,7 @@ from typing import Any, ClassVar
 
 from .config import SuiteConfig
 from .db import Journal
+from .fail_safes import sandbox_reject_allows_paper_fallback
 from .timeutil import utc_iso
 from .tradier import (
     TradierClient,
@@ -172,34 +173,111 @@ class ExecutionManager:
         now = utc_iso()
 
         if decision["action"] == "PAPER_ORDER":
-            fees = _leg_contracts(candidate) * self.config.trading.fee_per_contract * requested_quantity
-            order = {
-                "local_order_id": local_order_id,
-                "decision_id": decision["decision_id"],
-                "broker_order_id": None,
-                "created_at": now,
-                "updated_at": now,
-                "environment": "paper",
-                "status": "FILLED",
-                "order_class": "option" if len(candidate.get("legs", [])) == 1 else "multileg",
-                "order_type": candidate.get("entry_kind", "debit"),
-                "requested_price": entry_price,
-                "average_fill_price": entry_price,
-                "quantity": requested_quantity,
-                "previewed": False,
-                "payload": {
-                    "candidate": candidate,
-                    "simulated": True,
-                    "exec_quantity": requested_quantity,
-                    "remaining_quantity": 0,
-                    "estimated_fees": fees,
-                },
-            }
-            self.journal.insert_order(order)
-            self._open_position(decision, candidate, order, requested_quantity, fees)
-            return order
+            return self._fill_local_paper(
+                decision,
+                candidate,
+                local_order_id,
+                requested_quantity,
+                entry_price,
+                now,
+            )
 
         self.config.assert_broker_submission_safe()
+        try:
+            return self._execute_broker(
+                decision,
+                candidate,
+                local_order_id,
+                requested_quantity,
+                entry_price,
+                now,
+            )
+        except TradierError as exc:
+            self.journal.alert(
+                "critical",
+                "Broker submit rejected",
+                str(exc),
+                "execution",
+                {
+                    "status_code": getattr(exc, "status_code", None),
+                    "body": getattr(exc, "body", None),
+                    "candidate_id": candidate.get("candidate_id"),
+                    "strategy": candidate.get("strategy"),
+                },
+            )
+            if sandbox_reject_allows_paper_fallback(
+                paper_mode=self.config.trading.paper_mode,
+                environment=self.config.tradier.environment,
+                status_code=getattr(exc, "status_code", None),
+            ):
+                return self._fill_local_paper(
+                    decision,
+                    candidate,
+                    local_order_id,
+                    requested_quantity,
+                    entry_price,
+                    now,
+                    fallback_reason=str(exc),
+                )
+            raise
+
+    def _fill_local_paper(
+        self,
+        decision: dict[str, Any],
+        candidate: dict[str, Any],
+        local_order_id: str,
+        requested_quantity: int,
+        entry_price: float,
+        now: str,
+        *,
+        fallback_reason: str | None = None,
+    ) -> dict[str, Any]:
+        fees = _leg_contracts(candidate) * self.config.trading.fee_per_contract * requested_quantity
+        order = {
+            "local_order_id": local_order_id,
+            "decision_id": decision["decision_id"],
+            "broker_order_id": None,
+            "created_at": now,
+            "updated_at": now,
+            "environment": "paper",
+            "status": "FILLED",
+            "order_class": "option" if len(candidate.get("legs", [])) == 1 else "multileg",
+            "order_type": candidate.get("entry_kind", "debit"),
+            "requested_price": entry_price,
+            "average_fill_price": entry_price,
+            "quantity": requested_quantity,
+            "previewed": False,
+            "payload": {
+                "candidate": candidate,
+                "simulated": True,
+                "exec_quantity": requested_quantity,
+                "remaining_quantity": 0,
+                "estimated_fees": fees,
+                "sandbox_fallback": bool(fallback_reason),
+                "sandbox_reject": fallback_reason,
+            },
+        }
+        self.journal.insert_order(order)
+        self._open_position(decision, candidate, order, requested_quantity, fees)
+        if fallback_reason:
+            self.journal.alert(
+                "warning",
+                "Sandbox reject opened local paper fill",
+                fallback_reason,
+                "execution",
+                {"order": order["local_order_id"], "candidate": candidate.get("candidate_id")},
+            )
+        return order
+
+    def _execute_broker(
+        self,
+        decision: dict[str, Any],
+        candidate: dict[str, Any],
+        local_order_id: str,
+        requested_quantity: int,
+        entry_price: float,
+        now: str,
+    ) -> dict[str, Any]:
         payload = build_multileg_payload(candidate, requested_quantity, entry_price)
         payload["tag"] = f"{self.config.trading.tag_prefix}-{local_order_id[-8:]}"
         current_price = entry_price

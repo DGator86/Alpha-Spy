@@ -171,7 +171,6 @@ def _walk_forward_shadow_signal(
               AND p.horizon_minutes=?
               AND p.formal_anchor=1
               AND p.model_version=?
-              AND p.config_hash=?
             ORDER BY o.confirmed_at DESC
             LIMIT ?
             """,
@@ -179,7 +178,6 @@ def _walk_forward_shadow_signal(
                 utc_iso(as_of),
                 int(horizon_minutes),
                 config.prediction.model_version,
-                config.decision_fingerprint(),
                 int(config.prediction.shadow_model_lookback),
             ),
         ).fetchall()
@@ -254,7 +252,6 @@ def _walk_forward_ridge_signal(
               AND p.horizon_minutes=?
               AND p.formal_anchor=1
               AND p.model_version=?
-              AND p.config_hash=?
             ORDER BY o.confirmed_at DESC
             LIMIT ?
             """,
@@ -262,7 +259,6 @@ def _walk_forward_ridge_signal(
                 utc_iso(as_of),
                 int(horizon_minutes),
                 config.prediction.model_version,
-                config.decision_fingerprint(),
                 int(config.prediction.ridge_lookback),
             ),
         ).fetchall()
@@ -344,7 +340,6 @@ def _regime_calibration(
               AND o.confirmed_at <= ?
               AND p.horizon_minutes = ?
               AND p.model_version = ?
-              AND p.config_hash = ?
             ORDER BY o.confirmed_at DESC
             LIMIT ?
             """,
@@ -352,7 +347,6 @@ def _regime_calibration(
                 utc_iso(as_of),
                 int(horizon_minutes),
                 config.prediction.model_version,
-                config.decision_fingerprint(),
                 max(100, int(config.prediction.calibration_lookback)),
             ),
         ).fetchall()
@@ -675,6 +669,7 @@ def _single_prediction(
             "effective_horizon_minutes": effective_minutes,
             "calendar": calendar_meta,
             "calibration": calibration,
+            "calibration_fingerprint": config.calibration_fingerprint(),
             "transition_adjustment": {"mean_scale": mean_scale, "sigma_scale": sigma_scale},
             "regime_hierarchy": hierarchy.as_dict(),
             "regime_state": hierarchy.intraday.as_dict(),

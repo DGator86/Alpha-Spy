@@ -190,7 +190,7 @@ strategy:
   max_relative_spread: 0.35
   min_credit: 0.1
   max_debit: 3.5
-  max_width: 10.0
+  max_width: 3.5
   min_edge_dollars: 0.03
   min_probability: 0.6
   max_candidates_per_cycle: 40
@@ -203,7 +203,7 @@ strategy:
   require_multi_horizon_alignment: true
 risk:
   maximum_contracts: 1
-  maximum_trades_per_day: 1
+  maximum_trades_per_day: 8
   maximum_trade_risk_dollars: 100.0
   account_risk_fraction: 0.0025
   daily_loss_limit_dollars: 200.0
@@ -212,7 +212,7 @@ risk:
   orange_risk_multiplier: 0.25
   forced_flat_time_et: '15:55'
   entry_start_time_et: 09:40
-  entry_stop_time_et: '15:15'
+  entry_stop_time_et: '15:40'
   entry_grid_minutes: 5
   exit_monitor_interval_seconds: 60
   block_on_incomplete_universe: true

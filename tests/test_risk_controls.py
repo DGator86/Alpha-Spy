@@ -1,8 +1,8 @@
 """Tests for the documented fail-closed risk controls.
 
-README.md and BUILD_REPORT.md make specific safety promises: one contract, one
-trade per day, a $100 maximum modelled trade risk, a $200 managed daily-loss
-limit, one position at a time, time-gated entries, and a production submission
+README.md and BUILD_REPORT.md make specific safety promises: one contract, sequential
+same-day trades with one position at a time, a $100 maximum modelled trade risk, a
+$200 managed daily-loss limit, time-gated RTH entries, and a production submission
 path that cannot be opened from configuration alone. These exercise those
 promises directly rather than trusting the prose.
 """
