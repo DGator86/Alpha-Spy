@@ -384,6 +384,50 @@ def test_stream_event_updates_model_cache_without_using_sandbox_data(tmp_path: P
     assert service.config.tradier.environment == "production"
 
 
+def test_invalid_stream_symbol_rejection_is_recognized() -> None:
+    from alpha_spy.streaming_market import _INVALID_STREAM_SYMBOL
+
+    # Exact reason text observed from the Tradier production stream when the
+    # subscription includes an unsupported symbol: the server closes with 1007
+    # and this message, which previously drove a permanent reconnect loop.
+    reason = (
+        "received 1007 (invalid frame payload data) VIX9D is not a valid symbol; "
+        "then sent 1007 (invalid frame payload data) VIX9D is not a valid symbol"
+    )
+    match = _INVALID_STREAM_SYMBOL.search(reason)
+    assert match is not None
+    assert match.group(1) == "VIX9D"
+    assert _INVALID_STREAM_SYMBOL.search("connection reset by peer") is None
+
+
+def test_rest_refresh_of_rejected_symbols_does_not_fake_stream_freshness(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.tradier.market_access_token = SecretStr("market-token")
+    journal = Journal(config.paths.database)
+    service = StreamingMarketService(config, journal)
+
+    class FakeClient:
+        def quotes_chunked(self, symbols, greeks=False):
+            assert list(symbols) == ["VIX9D"]
+            return [
+                {
+                    "symbol": "VIX9D",
+                    "last": 14.2,
+                    "bid": None,
+                    "ask": None,
+                    "volume": 0,
+                    "close": 14.0,
+                }
+            ]
+
+    assert service._last_stream_event_at is None
+    service._refresh_rest_quotes(FakeClient(), [], ["VIX9D"])
+    assert service._cache["VIX9D"]["price"] == pytest.approx(14.2)
+    # REST polling of stream-rejected symbols must not reset the stream-age
+    # signal; only real websocket traffic (or the seed) may do that.
+    assert service._last_stream_event_at is None
+
+
 def test_stream_counts_timesale_prints_once(tmp_path: Path) -> None:
     """trade + timesale describe the same print; only timesale may accumulate OFI."""
     config = make_config(tmp_path)
@@ -444,6 +488,7 @@ def test_stream_deduplicates_timesale_sequence_ids(tmp_path: Path) -> None:
     micro = service._micro_snapshot()["SPY"]
     assert micro["trade_count"] == 1.0
     assert micro["trade_volume"] == pytest.approx(250.0)
+
 
 
 def test_event_calendar_is_required_and_time_bounded(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import deque
 from datetime import UTC, datetime
@@ -15,6 +16,12 @@ from .services import MarketService, StopFlag, _quote_is_stale
 from .timeutil import utc_iso, utc_now
 from .tradier import TradierClient, normalize_quote
 from .universe import Holding
+
+# Tradier closes the whole websocket with code 1007 and this reason text when
+# the subscription contains a symbol its streaming service does not recognize
+# (e.g. VIX9D). Without special handling the service reconnects forever,
+# resubscribes the same list, and is rejected again every ~2 seconds.
+_INVALID_STREAM_SYMBOL = re.compile(r"(\S+) is not a valid symbol")
 
 
 def _event_timestamp(value: Any) -> str:
@@ -119,6 +126,12 @@ class StreamingMarketService(MarketService):
             dict.fromkeys(["SPY", *self.config.market.include_symbols, *self._context_symbols(), *symbols])
         )
         delay = 1.0
+        invalid_stream_symbols: set[str] = set()
+        # The snapshot schedule survives reconnects. Resetting it per connection
+        # let a reconnect loop persist a full-universe snapshot on every attempt,
+        # flooding the journal at the reconnect rate instead of the configured
+        # stream_snapshot_interval_seconds.
+        next_snapshot = time.monotonic()
 
         while not flag.stopped:
             try:
@@ -136,8 +149,8 @@ class StreamingMarketService(MarketService):
                         websocket.send(
                             json.dumps(
                                 {
-                                    "symbols": symbols,
-                                    "filter": ["quote", "timesale", "summary"],
+                                    "symbols": [s for s in symbols if s not in invalid_stream_symbols],
+                                    "filter": ["quote", "trade", "timesale", "summary"],
                                     "sessionid": session_id,
                                     "linebreak": True,
                                     "validOnly": True,
@@ -145,7 +158,6 @@ class StreamingMarketService(MarketService):
                             )
                         )
                         delay = 1.0
-                        next_snapshot = time.monotonic()
                         while not flag.stopped:
                             try:
                                 raw = websocket.recv(timeout=1.0)
@@ -156,6 +168,14 @@ class StreamingMarketService(MarketService):
                             now_mono = time.monotonic()
                             if now_mono >= next_snapshot:
                                 started = time.perf_counter()
+                                if invalid_stream_symbols:
+                                    # Symbols the stream rejected still quote over
+                                    # REST (e.g. VIX9D); refresh them each snapshot
+                                    # cycle so they stay current instead of going
+                                    # permanently stale after the initial seed.
+                                    self._refresh_rest_quotes(
+                                        client, holdings, sorted(invalid_stream_symbols)
+                                    )
                                 snapshot_id = self._persist_snapshot(holdings, client)
                                 session_open = str(self._exchange_state).lower() in {"open", "pre"}
                                 if session_open:
@@ -175,6 +195,21 @@ class StreamingMarketService(MarketService):
                                     interval = max(interval, 300)
                                 next_snapshot = now_mono + interval
             except (ConnectionClosed, OSError, RuntimeError, ValueError) as exc:
+                rejected = _INVALID_STREAM_SYMBOL.search(str(exc))
+                if rejected is not None and rejected.group(1) not in invalid_stream_symbols:
+                    symbol = rejected.group(1)
+                    invalid_stream_symbols.add(symbol)
+                    self.journal.heartbeat(
+                        "market", "DEGRADED", None, f"stream rejected symbol {symbol}; resubscribing without it"
+                    )
+                    self.journal.alert(
+                        "warning",
+                        "Tradier stream rejected a subscription symbol",
+                        f"{symbol} was refused by the production stream and will be polled over REST instead",
+                        "market",
+                    )
+                    delay = 1.0
+                    continue
                 self.journal.heartbeat("market", "ERROR", None, str(exc))
                 self.journal.alert("critical", "Tradier production stream disconnected", str(exc), "market")
                 time.sleep(delay)
@@ -195,7 +230,19 @@ class StreamingMarketService(MarketService):
         self._exchange_state = str(clock.get("state", "unknown"))
         self._last_clock_refresh = time.monotonic()
 
-    def _seed_cache(self, holdings: list[Holding], normalized: dict[str, dict[str, Any]]) -> None:
+    def _refresh_rest_quotes(
+        self,
+        client: TradierClient,
+        holdings: list[Holding],
+        symbols: list[str],
+    ) -> None:
+        """Merge REST quotes for stream-rejected symbols without touching the
+        stream freshness timestamp, so a dead websocket still reads as stale."""
+        raw_quotes = client.quotes_chunked(symbols)
+        normalized = {q["symbol"]: q for q in map(normalize_quote, raw_quotes) if q["symbol"]}
+        self._merge_quotes(holdings, normalized)
+
+    def _merge_quotes(self, holdings: list[Holding], normalized: dict[str, dict[str, Any]]) -> None:
         weight_map = {h.symbol: h for h in holdings}
         for symbol, quote in normalized.items():
             holding = weight_map.get(symbol)
@@ -213,6 +260,9 @@ class StreamingMarketService(MarketService):
                 "sector": holding.sector if holding else "ETF",
                 "stale": False,
             }
+
+    def _seed_cache(self, holdings: list[Holding], normalized: dict[str, dict[str, Any]]) -> None:
+        self._merge_quotes(holdings, normalized)
         self._last_stream_event_at = utc_now()
 
     def _micro_state(self, symbol: str) -> dict[str, float]:
