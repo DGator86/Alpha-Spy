@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     dashboard_admin_token: str = ""
     dashboard_ingest_token: str = ""
 
+    # Browser origins allowed to call the API cross-origin, comma separated.
+    # Empty by default: served by FastAPI on the trading host the workstation is
+    # same-origin and needs none, and an unset value must never mean "any".
+    # Set this only when the UI is hosted elsewhere, e.g.
+    #   DASHBOARD_ALLOWED_ORIGINS=https://alpha-spy.vercel.app
+    dashboard_allowed_origins: str = ""
+
     tradier_env: str = Field(default="sandbox", pattern="^(sandbox|production)$")
     tradier_access_token: str = ""
     tradier_account_id: str = ""
@@ -36,6 +43,18 @@ class Settings(BaseSettings):
     websocket_interval_seconds: float = 1.0
     max_prediction_rows: int = 3000
     max_alert_rows: int = 1000
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        """Parsed cross-origin allow list.
+
+        A literal "*" is rejected rather than honoured. The dashboard exposes
+        account state and accepts operator commands, and wildcard CORS combined
+        with a token in browser storage is exactly the configuration that turns
+        any page the operator visits into a command channel.
+        """
+        origins = [item.strip().rstrip("/") for item in self.dashboard_allowed_origins.split(",")]
+        return [origin for origin in origins if origin and origin != "*"]
 
     @property
     def tradier_base_url(self) -> str:

@@ -350,6 +350,8 @@ class DashboardConfig(BaseModel):
     admin_token: SecretStr = SecretStr("")
     ingest_token: SecretStr = SecretStr("")
     websocket_interval_seconds: float = 1.0
+    # Empty by default so an unset value never means "any origin".
+    allowed_origins: list[str] = Field(default_factory=list)
 
 
 class BackupConfig(BaseModel):

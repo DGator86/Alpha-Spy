@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import deque
 from datetime import UTC, datetime
 from typing import Any
 
@@ -53,6 +54,10 @@ class StreamingMarketService(MarketService):
         self._last_clock_refresh = 0.0
         self._exchange_state = "unknown"
         self._micro: dict[str, dict[str, float]] = {}
+        # Defense in depth: uniquely sequenced timesales are canonical, but a
+        # reconnect can replay the same seq. Keep a short per-symbol memory.
+        self._timesale_seq: dict[str, deque[int]] = {}
+        self._timesale_seq_seen: dict[str, set[int]] = {}
 
     @property
     def market_token_configured(self) -> bool:
@@ -132,7 +137,7 @@ class StreamingMarketService(MarketService):
                             json.dumps(
                                 {
                                     "symbols": symbols,
-                                    "filter": ["quote", "trade", "timesale", "summary"],
+                                    "filter": ["quote", "timesale", "summary"],
                                     "sessionid": session_id,
                                     "linebreak": True,
                                     "validOnly": True,
@@ -152,7 +157,9 @@ class StreamingMarketService(MarketService):
                             if now_mono >= next_snapshot:
                                 started = time.perf_counter()
                                 snapshot_id = self._persist_snapshot(holdings, client)
-                                self._refresh_option_context(holdings, client, snapshot_id)
+                                session_open = str(self._exchange_state).lower() in {"open", "pre"}
+                                if session_open:
+                                    self._refresh_option_context(holdings, client, snapshot_id)
                                 self.journal.set_control("market_ready_snapshot_id", snapshot_id)
                                 latency = (time.perf_counter() - started) * 1000.0
                                 age = self._stream_age_seconds()
@@ -163,7 +170,10 @@ class StreamingMarketService(MarketService):
                                     latency,
                                     f"stream snapshot={snapshot_id} age={age:.1f}s events={self._stream_event_count}",
                                 )
-                                next_snapshot = now_mono + self.config.market.stream_snapshot_interval_seconds
+                                interval = self.config.market.stream_snapshot_interval_seconds
+                                if not session_open:
+                                    interval = max(interval, 300)
+                                next_snapshot = now_mono + interval
             except (ConnectionClosed, OSError, RuntimeError, ValueError) as exc:
                 self.journal.heartbeat("market", "ERROR", None, str(exc))
                 self.journal.alert("critical", "Tradier production stream disconnected", str(exc), "market")
@@ -324,11 +334,17 @@ class StreamingMarketService(MarketService):
                 )
                 self._record_quote_micro(symbol, current)
             elif event_type in {"trade", "tradex"}:
+                # Last-price/volume only. Tradier's trade and timesale families
+                # describe the same print; counting both double-counts
+                # buy/sell volume and OFI. Canonical prints are timesales.
                 self._set_float(current, "price", event.get("price") or event.get("last"))
                 self._set_float(current, "volume", event.get("cvol"))
                 current["quote_timestamp"] = _event_timestamp(event.get("date"))
-                self._record_trade_micro(symbol, current, event)
             elif event_type == "timesale":
+                if event.get("cancel") or event.get("correction"):
+                    continue
+                if self._timesale_already_seen(symbol, event.get("seq")):
+                    continue
                 self._set_float(current, "price", event.get("last"))
                 self._set_float(current, "bid", event.get("bid"))
                 self._set_float(current, "ask", event.get("ask"))
@@ -353,6 +369,21 @@ class StreamingMarketService(MarketService):
             current["stale"] = False
             self._last_stream_event_at = utc_now()
             self._stream_event_count += 1
+
+    def _timesale_already_seen(self, symbol: str, raw_seq: Any) -> bool:
+        try:
+            seq = int(raw_seq)
+        except (TypeError, ValueError):
+            return False
+        seen = self._timesale_seq_seen.setdefault(symbol, set())
+        order = self._timesale_seq.setdefault(symbol, deque())
+        if seq in seen:
+            return True
+        seen.add(seq)
+        order.append(seq)
+        while len(order) > 4096:
+            seen.discard(order.popleft())
+        return False
 
     @staticmethod
     def _set_float(target: dict[str, Any], key: str, value: Any) -> None:

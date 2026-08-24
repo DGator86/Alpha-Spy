@@ -175,6 +175,20 @@ class Repository:
             out.append(item)
         return out
 
+    def get_prediction(self, prediction_id: str) -> dict[str, Any] | None:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT * FROM predictions WHERE prediction_id=?", (prediction_id,)
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["direction_correct"] = (
+            None if item["direction_correct"] is None else bool(item["direction_correct"])
+        )
+        item["payload"] = json.loads(item.pop("payload_json") or "{}")
+        return item
+
     def prediction_metrics(self, limit: int = 500) -> dict[str, Any]:
         rows = [r for r in self.list_predictions(limit) if r["actual_price"] is not None]
         if not rows:
