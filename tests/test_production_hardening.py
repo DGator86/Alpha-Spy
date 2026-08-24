@@ -428,6 +428,68 @@ def test_rest_refresh_of_rejected_symbols_does_not_fake_stream_freshness(tmp_pat
     assert service._last_stream_event_at is None
 
 
+def test_stream_counts_timesale_prints_once(tmp_path: Path) -> None:
+    """trade + timesale describe the same print; only timesale may accumulate OFI."""
+    config = make_config(tmp_path)
+    config.tradier.market_access_token = SecretStr("market-token")
+    journal = Journal(config.paths.database)
+    service = StreamingMarketService(config, journal)
+    service._cache["SPY"] = {
+        "symbol": "SPY",
+        "price": 100.0,
+        "bid": 99.99,
+        "ask": 100.01,
+        "change_pct": 0.0,
+        "volume": 1.0,
+        "quote_timestamp": "2026-08-10T13:40:00Z",
+        "weight": 0.0,
+        "sector": "ETF",
+        "stale": False,
+        "payload": {},
+    }
+    service._ingest_payload(
+        '{"type":"trade","symbol":"SPY","price":"100.12","size":"250","cvol":"1000","date":"1786369201000"}'
+    )
+    service._ingest_payload(
+        '{"type":"timesale","symbol":"SPY","bid":"100.10","ask":"100.12",'
+        '"last":"100.12","size":"250","date":"1786369201000"}'
+    )
+    micro = service._micro_snapshot()["SPY"]
+    assert micro["trade_count"] == 1.0
+    assert micro["trade_volume"] == pytest.approx(250.0)
+    assert micro["buy_volume"] == pytest.approx(250.0)
+
+
+def test_stream_deduplicates_timesale_sequence_ids(tmp_path: Path) -> None:
+    """A replayed timesale with the same seq must not accumulate OFI twice."""
+    config = make_config(tmp_path)
+    config.tradier.market_access_token = SecretStr("market-token")
+    journal = Journal(config.paths.database)
+    service = StreamingMarketService(config, journal)
+    service._cache["SPY"] = {
+        "symbol": "SPY",
+        "price": 100.0,
+        "bid": 99.99,
+        "ask": 100.01,
+        "change_pct": 0.0,
+        "volume": 1.0,
+        "quote_timestamp": "2026-08-10T13:40:00Z",
+        "weight": 0.0,
+        "sector": "ETF",
+        "stale": False,
+        "payload": {},
+    }
+    first = (
+        '{"type":"timesale","symbol":"SPY","bid":"100.10","ask":"100.12",'
+        '"last":"100.12","size":"250","seq":"42","date":"1786369201000"}'
+    )
+    service._ingest_payload(first)
+    service._ingest_payload(first)
+    micro = service._micro_snapshot()["SPY"]
+    assert micro["trade_count"] == 1.0
+    assert micro["trade_volume"] == pytest.approx(250.0)
+
+
 
 def test_event_calendar_is_required_and_time_bounded(tmp_path: Path) -> None:
     config = make_config(tmp_path)

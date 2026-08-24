@@ -309,7 +309,13 @@ def build_distribution_bundle(
         common = [ticker for ticker in corr.columns if ticker in smiles]
         if len(common) >= 2:
             corr = corr.reindex(index=common, columns=common).fillna(0.0)
-            np.fill_diagonal(corr.values, 1.0)
+            # pandas 3 copy-on-write: .values can be a read-only view, and
+            # writing the diagonal through it raises "underlying array is
+            # read-only", which killed every engine cycle. Write the diagonal
+            # on an owned copy instead.
+            corr_values = corr.to_numpy(copy=True)
+            np.fill_diagonal(corr_values, 1.0)
+            corr = pd.DataFrame(corr_values, index=corr.index, columns=corr.columns)
             realized_offdiag = corr.to_numpy()[~np.eye(len(corr), dtype=bool)]
             realized_corr = float(np.nanmedian(realized_offdiag)) if realized_offdiag.size else 0.0
             if spy_iv is not None:

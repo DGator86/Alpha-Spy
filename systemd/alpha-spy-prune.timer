@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly Alpha-SPY data retention
+
+[Timer]
+OnCalendar=*-*-* 22:15:00 America/New_York
+Persistent=true
+AccuracySec=1m
+Unit=alpha-spy-prune.service
+
+[Install]
+WantedBy=timers.target

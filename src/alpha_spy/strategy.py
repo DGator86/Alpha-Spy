@@ -10,6 +10,7 @@ import numpy as np
 from scipy.stats import norm
 
 from .config import SuiteConfig
+from .session_tape import structure_session_veto
 from .timeutil import ET, utc_iso
 
 
@@ -335,7 +336,20 @@ def _evaluate_structure(
         if bearish and probability_up > 0.45:
             strategy_fit = False
             fit_reasons.append("bearish_probability_too_low")
-    elif family == "short_vol":
+    market_context = payload.get("market_context") if isinstance(payload.get("market_context"), dict) else {}
+    session_signals = market_context.get("signals") if isinstance(market_context.get("signals"), dict) else {}
+    session_veto = structure_session_veto(
+        name,
+        family,
+        open_bps=session_signals.get("session_open_distance_bps"),
+        vwap_bps=session_signals.get("auction_vwap_distance_bps"),
+        bias_bps=config.strategy.session_bias_bps,
+        short_vol_bps=config.strategy.session_short_vol_bps,
+    )
+    if session_veto:
+        strategy_fit = False
+        fit_reasons.append(session_veto)
+    if family == "short_vol":
         if q_vol <= p_vol * 1.03:
             strategy_fit = False
             fit_reasons.append("vol_not_rich_enough")

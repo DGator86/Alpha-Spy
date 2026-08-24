@@ -574,11 +574,20 @@ class MarketService:
             "source": source,
             "payload": extra,
         }
-        self.journal.insert_snapshot(snapshot, quotes)
-        append_jsonl(
-            self.config.paths.state_root / "market" / f"quotes-{et_now().date().isoformat()}.jsonl",
-            {"snapshot": snapshot, "quotes": quotes},
-        )
+        persist_full = str(exchange_state).lower() in {"open", "pre"}
+        stored_quotes = quotes if persist_full else [q for q in quotes if q.get("symbol") == "SPY"]
+        snapshot["quote_count"] = len(stored_quotes)
+        snapshot["stale_quote_count"] = sum(bool(q.get("stale")) for q in stored_quotes)
+        self.journal.insert_snapshot(snapshot, stored_quotes)
+        # Full-universe JSONL is ~14 MB per snapshot. Writing it around the
+        # clock filled the disk over a weekend (20 GB on Sunday alone) and
+        # took every service down. Persist the 500-name tape only while the
+        # cash session is open or in pre-market.
+        if persist_full:
+            append_jsonl(
+                self.config.paths.state_root / "market" / f"quotes-{et_now().date().isoformat()}.jsonl",
+                {"snapshot": snapshot, "quotes": quotes},
+            )
         return snapshot_id
 
 
