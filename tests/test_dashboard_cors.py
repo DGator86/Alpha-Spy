@@ -8,6 +8,8 @@ honoured.
 """
 from __future__ import annotations
 
+import os
+
 from alpha_spy.dashboard.config import Settings
 
 
@@ -59,6 +61,7 @@ def test_allowed_origins_from_config_yaml_reach_the_dashboard(tmp_path, monkeypa
     _configure_dashboard_env(config)
 
     assert Settings().allowed_origins == ["https://alpha-spy.vercel.app"]
+    assert os.environ["TRADIER_ENV"] == config.tradier.market_environment
 
 
 def test_empty_config_list_does_not_clobber_the_env_file(tmp_path, monkeypatch):

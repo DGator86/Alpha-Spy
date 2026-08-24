@@ -731,10 +731,14 @@ class Journal:
         return item
 
     def insert_features(self, feature: dict[str, Any]) -> None:
+        # INSERT OR REPLACE is required for crash recovery. If the engine dies
+        # after writing features/predictions but before last_engine_snapshot_id
+        # advances (pandas CoW did this on 82.29.155.71 for days), the next
+        # cycle must overwrite the same primary key instead of UNIQUE-failing.
         with self.transaction() as con:
             con.execute(
                 """
-                INSERT INTO features(
+                INSERT OR REPLACE INTO features(
                     snapshot_id,created_at,breadth,weighted_pressure,concentration,dispersion,
                     correlation,downside_correlation,weighted_return,residual_pressure,
                     realized_vol,trust_score,health_state,payload_json
@@ -753,7 +757,7 @@ class Journal:
         with self.transaction() as con:
             con.execute(
                 """
-                INSERT INTO predictions(
+                INSERT OR REPLACE INTO predictions(
                     prediction_id,snapshot_id,created_at,target_at,horizon_minutes,formal_anchor,spy_price,
                     predicted_price,predicted_low,predicted_high,probability_up,expected_return,
                     sigma_return,regime,model_version,config_hash,feature_hash,integrity,payload_json
@@ -777,7 +781,7 @@ class Journal:
         with self.transaction() as con:
             con.executemany(
                 """
-                INSERT INTO candidates(
+                INSERT OR REPLACE INTO candidates(
                     candidate_id,prediction_id,created_at,strategy,status,score,probability_profit,
                     expected_value,max_profit,max_loss,entry_price,width,expiration,rejection_reason,
                     legs_json,payload_json
@@ -799,7 +803,7 @@ class Journal:
         with self.transaction() as con:
             con.execute(
                 """
-                INSERT INTO decisions(
+                INSERT OR REPLACE INTO decisions(
                     decision_id,prediction_id,candidate_id,created_at,action,reason,allowed_risk,
                     trust_score,health_state,payload_json
                 ) VALUES(?,?,?,?,?,?,?,?,?,?)

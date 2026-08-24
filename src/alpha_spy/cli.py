@@ -103,10 +103,15 @@ def _configure_dashboard_env(config: SuiteConfig) -> None:
     # allow list set in /etc/alpha-spy/dashboard.env.
     if config.dashboard.allowed_origins:
         os.environ["DASHBOARD_ALLOWED_ORIGINS"] = ",".join(config.dashboard.allowed_origins)
-    os.environ["TRADIER_ENV"] = config.tradier.environment
-    os.environ["TRADIER_ACCESS_TOKEN"] = config.tradier.access_token.get_secret_value()
+    # Dashboard is read-only. Point it at the market-data environment/token so
+    # it does not open a sandbox session with a production token (401 loop on
+    # 82.29.155.71) or an execution book. The engine still uses execution creds.
+    market_token = config.tradier.market_access_token.get_secret_value()
+    os.environ["TRADIER_ENV"] = config.tradier.market_environment
+    os.environ["TRADIER_ACCESS_TOKEN"] = market_token or config.tradier.access_token.get_secret_value()
     os.environ["TRADIER_ACCOUNT_ID"] = config.tradier.account_id
     os.environ["TRADIER_READ_ONLY"] = "true"
+    os.environ["TRADIER_STREAM_ENABLED"] = str(config.tradier.stream_enabled).lower()
     os.environ["ENGINE_NAME"] = "Alpha-SPY"
     os.environ["ENGINE_VERSION"] = __version__
 

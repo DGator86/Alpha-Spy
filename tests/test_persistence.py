@@ -117,6 +117,58 @@ def test_integrity_check_reports_ok_on_a_fresh_database(tmp_path):
     assert Journal(tmp_path / "j.db").integrity_check() == "ok"
 
 
+def test_insert_features_overwrites_the_same_snapshot(tmp_path):
+    """Engine crash recovery: a retried cycle must not UNIQUE-fail on features.
+
+    82.29.155.71 spent days alerting UNIQUE constraint failed: features.snapshot_id
+    because the engine wrote features, then crashed in prediction, and never
+    advanced last_engine_snapshot_id.
+    """
+    journal = Journal(tmp_path / "j.db")
+    snapshot = {
+        "snapshot_id": "S-retry",
+        "captured_at": "2026-08-18T15:00:00Z",
+        "exchange_state": "open",
+        "spy_price": 768.0,
+        "spy_bid": 767.99,
+        "spy_ask": 768.01,
+        "covered_weight": 1.0,
+        "quote_count": 1,
+        "stale_quote_count": 0,
+        "integrity": "VERIFIED",
+        "source": "test",
+        "payload": {},
+    }
+    journal.insert_snapshot(snapshot, [{"symbol": "SPY", "price": 768.0, "bid": 767.99, "ask": 768.01}])
+    feature = {
+        "snapshot_id": "S-retry",
+        "created_at": "2026-08-18T15:00:01Z",
+        "breadth": 0.5,
+        "weighted_pressure": 0.0,
+        "concentration": 0.0,
+        "dispersion": 0.0,
+        "correlation": 0.0,
+        "downside_correlation": 0.0,
+        "weighted_return": 0.0,
+        "residual_pressure": 0.0,
+        "realized_vol": 0.01,
+        "trust_score": 0.4,
+        "health_state": "RED",
+        "payload": {"pass": 1},
+    }
+    journal.insert_features(feature)
+    feature["trust_score"] = 0.9
+    feature["health_state"] = "GREEN"
+    feature["payload"] = {"pass": 2}
+    journal.insert_features(feature)
+    stored = journal.latest_features()
+    assert stored is not None
+    assert stored["snapshot_id"] == "S-retry"
+    assert stored["trust_score"] == 0.9
+    assert stored["health_state"] == "GREEN"
+    assert stored["payload"]["pass"] == 2
+
+
 def test_matured_predictions_are_not_reselected(tmp_path):
     """The confirmation tape is append-once: a matured forecast never returns.
 
