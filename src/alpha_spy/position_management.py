@@ -16,6 +16,7 @@ class PositionSignal:
     iv_edge_gap: float
     spot: float
     session_open: float = 0.0
+    vwap_distance_bps: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -322,9 +323,9 @@ def evaluate_position(
         if pnl < 0.30 * risk_basis or abs(signal.forecast_return) < 0.00025:
             reason = "late_session_risk_reduction"
 
-    # Directional 0DTE debits hold the session: trail, thesis invalidation, $1.40
-    # reversal, vertical target, and 15:55 flatten. A 15-minute forecast clock
-    # chopped Friday's $2–$3 impulse book into a losing naked put.
+    # Directional 0DTE debits hold the session: trail, $1.40 reversal, vertical
+    # target, and 15:55 flatten. A 15-minute forecast clock chopped Friday's
+    # $2–$3 impulse book; session-agree hold on main is the weaker form of this.
     if reason is None and elapsed >= horizon and family != "directional_long":
         reason = "forecast_horizon_exit"
 

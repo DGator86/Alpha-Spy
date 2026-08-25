@@ -197,6 +197,14 @@ def test_five_minute_entry_grid_is_deterministic(tmp_path: Path) -> None:
     assert _on_entry_grid(config, "2026-08-10T13:41:17Z") is False
 
 
+def test_tradier_treats_string_null_collections_as_empty() -> None:
+    """Tradier returns the string 'null' for empty orders/positions/quotes."""
+    assert TradierClient._object("null") == {}
+    assert TradierClient._object(None) == {}
+    assert TradierClient._as_list(TradierClient._object("null").get("order")) == []
+    assert TradierClient._as_list(TradierClient._object({"order": {"id": 1}}).get("order")) == [{"id": 1}]
+
+
 def test_tradier_change_endpoint_refuses_multileg_debit_type(tmp_path: Path) -> None:
     config = make_config(tmp_path)
     config.tradier.access_token = SecretStr("x")
@@ -386,6 +394,112 @@ def test_stream_event_updates_model_cache_without_using_sandbox_data(tmp_path: P
     assert service._cache["SPY"]["bid"] == pytest.approx(100.10)
     assert service._cache["SPY"]["change_pct"] == pytest.approx(100.11 / 99.0 - 1.0)
     assert service.config.tradier.environment == "production"
+
+
+def test_invalid_stream_symbol_rejection_is_recognized() -> None:
+    from alpha_spy.streaming_market import _INVALID_STREAM_SYMBOL
+
+    # Exact reason text observed from the Tradier production stream when the
+    # subscription includes an unsupported symbol: the server closes with 1007
+    # and this message, which previously drove a permanent reconnect loop.
+    reason = (
+        "received 1007 (invalid frame payload data) VIX9D is not a valid symbol; "
+        "then sent 1007 (invalid frame payload data) VIX9D is not a valid symbol"
+    )
+    match = _INVALID_STREAM_SYMBOL.search(reason)
+    assert match is not None
+    assert match.group(1) == "VIX9D"
+    assert _INVALID_STREAM_SYMBOL.search("connection reset by peer") is None
+
+
+def test_rest_refresh_of_rejected_symbols_does_not_fake_stream_freshness(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.tradier.market_access_token = SecretStr("market-token")
+    journal = Journal(config.paths.database)
+    service = StreamingMarketService(config, journal)
+
+    class FakeClient:
+        def quotes_chunked(self, symbols, greeks=False):
+            assert list(symbols) == ["VIX9D"]
+            return [
+                {
+                    "symbol": "VIX9D",
+                    "last": 14.2,
+                    "bid": None,
+                    "ask": None,
+                    "volume": 0,
+                    "close": 14.0,
+                }
+            ]
+
+    assert service._last_stream_event_at is None
+    service._refresh_rest_quotes(FakeClient(), [], ["VIX9D"])
+    assert service._cache["VIX9D"]["price"] == pytest.approx(14.2)
+    # REST polling of stream-rejected symbols must not reset the stream-age
+    # signal; only real websocket traffic (or the seed) may do that.
+    assert service._last_stream_event_at is None
+
+
+def test_stream_counts_timesale_prints_once(tmp_path: Path) -> None:
+    """trade + timesale describe the same print; only timesale may accumulate OFI."""
+    config = make_config(tmp_path)
+    config.tradier.market_access_token = SecretStr("market-token")
+    journal = Journal(config.paths.database)
+    service = StreamingMarketService(config, journal)
+    service._cache["SPY"] = {
+        "symbol": "SPY",
+        "price": 100.0,
+        "bid": 99.99,
+        "ask": 100.01,
+        "change_pct": 0.0,
+        "volume": 1.0,
+        "quote_timestamp": "2026-08-10T13:40:00Z",
+        "weight": 0.0,
+        "sector": "ETF",
+        "stale": False,
+        "payload": {},
+    }
+    service._ingest_payload(
+        '{"type":"trade","symbol":"SPY","price":"100.12","size":"250","cvol":"1000","date":"1786369201000"}'
+    )
+    service._ingest_payload(
+        '{"type":"timesale","symbol":"SPY","bid":"100.10","ask":"100.12",'
+        '"last":"100.12","size":"250","date":"1786369201000"}'
+    )
+    micro = service._micro_snapshot()["SPY"]
+    assert micro["trade_count"] == 1.0
+    assert micro["trade_volume"] == pytest.approx(250.0)
+    assert micro["buy_volume"] == pytest.approx(250.0)
+
+
+def test_stream_deduplicates_timesale_sequence_ids(tmp_path: Path) -> None:
+    """A replayed timesale with the same seq must not accumulate OFI twice."""
+    config = make_config(tmp_path)
+    config.tradier.market_access_token = SecretStr("market-token")
+    journal = Journal(config.paths.database)
+    service = StreamingMarketService(config, journal)
+    service._cache["SPY"] = {
+        "symbol": "SPY",
+        "price": 100.0,
+        "bid": 99.99,
+        "ask": 100.01,
+        "change_pct": 0.0,
+        "volume": 1.0,
+        "quote_timestamp": "2026-08-10T13:40:00Z",
+        "weight": 0.0,
+        "sector": "ETF",
+        "stale": False,
+        "payload": {},
+    }
+    first = (
+        '{"type":"timesale","symbol":"SPY","bid":"100.10","ask":"100.12",'
+        '"last":"100.12","size":"250","seq":"42","date":"1786369201000"}'
+    )
+    service._ingest_payload(first)
+    service._ingest_payload(first)
+    micro = service._micro_snapshot()["SPY"]
+    assert micro["trade_count"] == 1.0
+    assert micro["trade_volume"] == pytest.approx(250.0)
 
 
 

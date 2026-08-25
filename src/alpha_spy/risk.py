@@ -120,6 +120,173 @@ def trades_today(journal: Journal, now: datetime | None = None) -> int:
     return count
 
 
+@dataclass(frozen=True)
+class Gate:
+    """One entry-gate evaluation.
+
+    ``reason`` is the code published on the decision when this is the first gate
+    to fail, so the strings here are the contract the journal and the tests are
+    written against. ``detail`` is always populated — a passing gate still has to
+    explain what it measured, because the workstation renders the full ladder and
+    not only the failure.
+    """
+
+    name: str
+    label: str
+    kind: str
+    passed: bool
+    reason: str
+    detail: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "label": self.label,
+            "kind": self.kind,
+            "passed": self.passed,
+            "reason": self.reason,
+            "detail": self.detail,
+        }
+
+
+def _veto(name: str, label: str, passed: bool, reason: str, detail: str) -> Gate:
+    return Gate(name=name, label=label, kind="veto", passed=passed, reason=reason, detail=detail)
+
+
+def _qualifier(name: str, label: str, passed: bool, reason: str, detail: str) -> Gate:
+    return Gate(name=name, label=label, kind="qualifier", passed=passed, reason=reason, detail=detail)
+
+
+def evaluate_entry_gates(
+    config: SuiteConfig,
+    journal: Journal,
+    feature: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    account: AccountState,
+    *,
+    now: datetime | None = None,
+) -> tuple[list[Gate], list[dict[str, Any]], float]:
+    """Evaluate every entry gate and return them with the surviving candidates.
+
+    The original implementation short-circuited on the first failure, so a
+    ``NO_TRADE`` told you one thing that was wrong and nothing about the other
+    nine checks. Every gate is evaluated here so the decision record can carry
+    the whole ladder; ordering is preserved exactly, because ``choose_decision``
+    still reports the first failure as the decision reason.
+    """
+    now = now or utc_now()
+    health_state = str(feature.get("health_state") or "RED")
+    trust_score = float(feature.get("trust_score") or 0.0)
+    risk = allowed_risk(config, account, trust_score, health_state)
+    traded = trades_today(journal, now)
+    open_position = journal.open_position()
+    loss_limit = abs(config.risk.daily_loss_limit_dollars)
+
+    gates = [
+        _veto(
+            "operator_paused",
+            "Operator pause",
+            journal.get_control("entries_paused", "false").lower() != "true",
+            "operator_paused",
+            "entries paused by operator command"
+            if journal.get_control("entries_paused", "false").lower() == "true"
+            else "entries enabled",
+        ),
+        _veto(
+            "entry_window",
+            "Entry window",
+            in_et_window(now, config.risk.entry_start_time_et, config.risk.entry_stop_time_et),
+            "outside_entry_window",
+            f"{config.risk.entry_start_time_et}–{config.risk.entry_stop_time_et} ET "
+            f"(now {now.astimezone(ET).strftime('%H:%M')} ET)",
+        ),
+        _veto(
+            "account_state",
+            "Broker account state",
+            account.valid,
+            "account_state_invalid",
+            account.reason or f"{account.source} balances accepted",
+        ),
+        _veto(
+            "buying_power",
+            "Buying power",
+            account.buying_power > 0,
+            "no_buying_power",
+            f"${account.buying_power:,.2f} available",
+        ),
+        _veto(
+            "daily_loss_limit",
+            "Daily loss limit",
+            account.daily_pnl > -loss_limit,
+            "daily_loss_limit",
+            f"day P&L ${account.daily_pnl:,.2f} against ${-loss_limit:,.2f} limit",
+        ),
+        _veto(
+            "daily_trade_limit",
+            "Daily trade limit",
+            traded < config.risk.maximum_trades_per_day,
+            "daily_trade_limit",
+            f"{traded} of {config.risk.maximum_trades_per_day} trades used today",
+        ),
+        _qualifier(
+            "trust_threshold",
+            "Audit trust",
+            trust_score >= config.risk.minimum_trust_to_trade,
+            "trust_below_threshold",
+            f"trust {trust_score:.2f} against {config.risk.minimum_trust_to_trade:.2f} floor",
+        ),
+        _qualifier(
+            "health_state",
+            "Supervisory health",
+            health_state == "GREEN",
+            f"health_{health_state.lower()}",
+            f"health {health_state}",
+        ),
+        _qualifier(
+            "risk_budget",
+            "Risk budget",
+            risk > 0,
+            "zero_allowed_risk",
+            f"${risk:,.2f} allowed against ${config.risk.maximum_trade_risk_dollars:,.2f} base",
+        ),
+        _veto(
+            "no_managed_position",
+            "Managed position flat",
+            open_position is None,
+            "managed_position_already_open",
+            f"position {open_position['position_id']} open" if open_position else "flat",
+        ),
+    ]
+
+    affordable = [
+        candidate
+        for candidate in candidates
+        if candidate.get("status") == "ELIGIBLE"
+        and float(candidate.get("max_loss") or 0.0) <= risk + 1e-9
+        and float(candidate.get("max_loss") or 0.0) <= account.buying_power + 1e-9
+    ]
+    eligible_count = sum(1 for c in candidates if c.get("status") == "ELIGIBLE")
+    gates.append(
+        _qualifier(
+            "eligible_structure",
+            "Qualified structure",
+            eligible_count > 0,
+            "no_eligible_candidate",
+            f"{eligible_count} of {len(candidates)} ranked structures eligible",
+        )
+    )
+    gates.append(
+        _qualifier(
+            "structure_within_risk",
+            "Structure within risk budget",
+            bool(affordable),
+            "no_candidate_within_allowed_risk",
+            f"{len(affordable)} structure(s) priced at or under ${risk:,.2f}",
+        )
+    )
+    return gates, affordable, risk
+
+
 def no_trade_decision(
     prediction: dict[str, Any],
     feature: dict[str, Any],
@@ -157,54 +324,32 @@ def choose_decision(
     now = now or utc_now()
     health_state = str(feature["health_state"])
     trust_score = float(feature["trust_score"])
-    risk = allowed_risk(config, account, trust_score, health_state)
-    action = "NO_TRADE"
-    reason = "no_eligible_candidate"
-    chosen: dict[str, Any] | None = None
+    gates, affordable, risk = evaluate_entry_gates(
+        config, journal, feature, candidates, account, now=now
+    )
 
-    if journal.get_control("entries_paused", "false").lower() == "true":
-        reason = "operator_paused"
-    elif not in_et_window(now, config.risk.entry_start_time_et, config.risk.entry_stop_time_et):
-        reason = "outside_entry_window"
-    elif not account.valid:
-        reason = "account_state_invalid"
-    elif account.buying_power <= 0:
-        reason = "no_buying_power"
-    elif account.daily_pnl <= -abs(config.risk.daily_loss_limit_dollars):
-        reason = "daily_loss_limit"
-    elif trades_today(journal, now) >= config.risk.maximum_trades_per_day:
-        reason = "daily_trade_limit"
-    elif trust_score < config.risk.minimum_trust_to_trade:
-        reason = "trust_below_threshold"
-    elif health_state != "GREEN":
-        reason = f"health_{health_state.lower()}"
-    elif risk <= 0:
-        reason = "zero_allowed_risk"
-    elif (open_position := journal.open_position()) is not None:
+    failed = [gate for gate in gates if not gate.passed]
+    chosen: dict[str, Any] | None = None
+    open_position = journal.open_position()
+    if open_position is not None:
         errors = int(open_position.get("payload", {}).get("management_error_count") or 0)
         if errors >= MANAGEMENT_ERROR_FLATTEN:
             journal.set_control("flatten_requested", "true")
+            action = "NO_TRADE"
             reason = "managed_position_unmanageable"
+        elif failed:
+            action = "NO_TRADE"
+            reason = failed[0].reason
         else:
+            action = "NO_TRADE"
             reason = "managed_position_already_open"
+    elif failed:
+        action = "NO_TRADE"
+        reason = failed[0].reason
     else:
-        eligible = [
-            c
-            for c in candidates
-            if c.get("status") == "ELIGIBLE"
-            and float(c.get("max_loss") or 0.0) <= risk + 1e-9
-            and float(c.get("max_loss") or 0.0) <= account.buying_power + 1e-9
-        ]
-        if eligible:
-            chosen = max(eligible, key=lambda c: float(c["score"]))
-            if config.trading.submit_orders:
-                action = "SUBMIT_ORDER"
-                reason = "best_risk_eligible_candidate"
-            else:
-                action = "PAPER_ORDER"
-                reason = "best_risk_eligible_candidate"
-        else:
-            reason = "no_candidate_within_allowed_risk"
+        chosen = max(affordable, key=lambda c: float(c["score"]))
+        action = "SUBMIT_ORDER" if config.trading.submit_orders else "PAPER_ORDER"
+        reason = "best_risk_eligible_candidate"
 
     return {
         "decision_id": f"D-{uuid.uuid4().hex[:16]}",
@@ -220,6 +365,10 @@ def choose_decision(
             "candidate": chosen,
             "account": account.__dict__,
             "trades_today": trades_today(journal, now),
+            "gates": [gate.as_dict() for gate in gates],
+            "failed_gates": [gate.name for gate in failed],
+            "considered_candidates": len(candidates),
+            "affordable_candidates": len(affordable),
         },
     }
 

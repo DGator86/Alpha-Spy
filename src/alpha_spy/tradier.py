@@ -151,6 +151,13 @@ class TradierClient:
             return [value]
         return []
 
+    @staticmethod
+    def _object(value: Any) -> dict[str, Any]:
+        # Tradier serializes empty collections as the string "null" (and
+        # occasionally other scalars). Calling .get on that killed every
+        # broker-reconciliation cycle on 82.29.155.71.
+        return value if isinstance(value, dict) else {}
+
     def create_market_session(self) -> str:
         if self.purpose != "market":
             raise TradierError("market streaming session requires purpose='market'")
@@ -172,10 +179,7 @@ class TradierClient:
         if not self.account_id:
             return []
         payload = self.request("GET", f"/accounts/{self.account_id}/positions")
-        block = payload.get("positions") if isinstance(payload, dict) else None
-        if not isinstance(block, dict):
-            return []
-        return self._as_list(block.get("position"))
+        return self._as_list(self._object(payload.get("positions")).get("position"))
 
     def orders(self, *, include_tags: bool = True, limit: int = 1000) -> list[dict[str, Any]]:
         if not self.account_id:
@@ -185,10 +189,7 @@ class TradierClient:
             f"/accounts/{self.account_id}/orders",
             params={"includeTags": str(bool(include_tags)).lower(), "limit": max(25, int(limit))},
         )
-        block = payload.get("orders") if isinstance(payload, dict) else None
-        if not isinstance(block, dict):
-            return []
-        return self._as_list(block.get("order"))
+        return self._as_list(self._object(payload.get("orders")).get("order"))
 
     def order(self, order_id: str | int) -> dict[str, Any]:
         payload = self.request(
@@ -215,7 +216,7 @@ class TradierClient:
             "/markets/quotes",
             data={"symbols": ",".join(symbols), "greeks": str(bool(greeks)).lower()},
         )
-        quote = payload.get("quotes", {}).get("quote") if payload.get("quotes") else None
+        quote = self._object(payload.get("quotes")).get("quote")
         return self._as_list(quote)
 
     def quotes_chunked(self, symbols: Iterable[str], greeks: bool = False) -> list[dict[str, Any]]:
@@ -232,7 +233,7 @@ class TradierClient:
             "/markets/options/expirations",
             params={"symbol": symbol, "includeAllRoots": "true", "strikes": "false"},
         )
-        dates = payload.get("expirations", {}).get("date") if payload.get("expirations") else None
+        dates = self._object(payload.get("expirations")).get("date")
         if dates is None:
             return []
         return [dates] if isinstance(dates, str) else list(dates)
@@ -243,7 +244,7 @@ class TradierClient:
             "/markets/options/chains",
             params={"symbol": symbol, "expiration": expiration, "greeks": str(bool(greeks)).lower()},
         )
-        option = payload.get("options", {}).get("option") if payload.get("options") else None
+        option = self._object(payload.get("options")).get("option")
         return self._as_list(option)
 
     def timesales(
@@ -264,7 +265,7 @@ class TradierClient:
         if end:
             params["end"] = end
         payload = self.request("GET", "/markets/timesales", params=params)
-        data = payload.get("series", {}).get("data") if payload.get("series") else None
+        data = self._object(payload.get("series")).get("data")
         return self._as_list(data)
 
     def preview_order(self, payload: dict[str, Any]) -> dict[str, Any]:

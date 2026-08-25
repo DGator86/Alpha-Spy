@@ -45,7 +45,10 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-"alpha_spy.dashboard" = ["static/*", "static/assets/*"]
+# MANIFEST.in recursive-include is the source of truth. These patterns are the
+# fallback when a VPS `pip install --no-deps .` would otherwise ship index.html
+# and drop static/assets/*. That happened on 82.29.155.71.
+"alpha_spy.dashboard" = ["static/*", "static/assets/*", "static/assets/*.js", "static/assets/*.css"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

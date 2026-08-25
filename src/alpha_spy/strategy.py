@@ -413,6 +413,8 @@ def _evaluate_structure(
             family,
             open_bps=signals.get("session_open_distance_bps"),
             vwap_bps=signals.get("auction_vwap_distance_bps"),
+            bias_bps=config.strategy.session_bias_bps,
+            short_vol_bps=config.strategy.session_short_vol_bps,
         )
         if veto:
             strategy_fit = False

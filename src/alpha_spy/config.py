@@ -279,6 +279,12 @@ class StrategyConfig(BaseModel):
     min_edge_to_uncertainty: float = Field(default=0.75, ge=0.0)
     require_positive_doubled_cost_ev: bool = True
     require_multi_horizon_alignment: bool = True
+    # 2026-08-17: a -35 bp grind never reclaimed the open. Directional 0DTE
+    # must agree with that session bias; short-vol is blocked once the move
+    # is large enough that condors are the wrong structure.
+    session_bias_bps: float = Field(default=6.0, ge=0.0, le=40.0)
+    session_hold_bps: float = Field(default=8.0, ge=0.0, le=40.0)
+    session_short_vol_bps: float = Field(default=12.0, ge=0.0, le=80.0)
 
     @field_validator("assumed_expiry_time_et")
     @classmethod
@@ -350,7 +356,9 @@ class DashboardConfig(BaseModel):
     admin_token: SecretStr = SecretStr("")
     ingest_token: SecretStr = SecretStr("")
     websocket_interval_seconds: float = 1.0
-    # Empty by default so an unset value never means "any origin".
+    # Browser origins allowed to call the API cross-origin. Needed only when the
+    # workstation is hosted off this machine (e.g. Vercel); empty means no
+    # cross-origin access, which is correct for the loopback/SSH-tunnel default.
     allowed_origins: list[str] = Field(default_factory=list)
 
 

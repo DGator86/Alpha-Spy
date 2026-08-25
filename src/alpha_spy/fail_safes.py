@@ -38,6 +38,7 @@ def build_position_signal(**kwargs: Any) -> PositionSignal:
         iv_edge_gap=float(filtered.get("iv_edge_gap") or 0.0),
         spot=float(filtered.get("spot") or 0.0),
         session_open=float(filtered.get("session_open") or 0.0),
+        vwap_distance_bps=float(filtered.get("vwap_distance_bps") or 0.0),
     )
 
 
