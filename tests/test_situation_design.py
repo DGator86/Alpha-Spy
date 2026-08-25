@@ -142,3 +142,56 @@ def test_range_payload_rejects_directionals_and_keeps_condor(tmp_path: Path) -> 
     assert condors
     assert any("range_day_condor_only" in str(row["rejection_reason"]) for row in directionals)
     assert all("range_day_condor_only" not in str(row.get("rejection_reason") or "") for row in condors)
+
+
+def test_dollar_forty_needs_eight_minutes_to_be_tradeable() -> None:
+    short = swing_from_path([770.25, 769.80, 769.20, 768.73])
+    assert short.confirmed is True
+    assert short.tradeable is False
+    prices = [770.0]
+    for i in range(1, 9):
+        prices.append(770.0 - 0.20 * i)
+    long_leg = swing_from_path(prices)
+    assert long_leg.confirmed is True
+    assert long_leg.tradeable is True
+    assert long_leg.had_tradeable is True
+    assert long_leg.direction == -1
+
+
+def test_range_is_blocked_after_a_tradeable_impulse() -> None:
+    situation = classify_situation(
+        minutes_open=46,
+        session_range=1.78,
+        confirmed_impulse=False,
+        had_tradeable_impulse=True,
+    )
+    assert situation == "TREND"
+    assert structure_situation_veto("IRON_CONDOR", "short_vol", situation=situation) == (
+        "trend_day_blocks_condor"
+    )
+    assert (
+        structure_situation_veto(
+            "PUT_DEBIT_SPREAD", "directional_long", situation=situation, direction=-1
+        )
+        is None
+    )
+
+
+def test_reverse_off_a_tradeable_leg_stays_impulse() -> None:
+    prices = [770.0]
+    for i in range(1, 9):
+        prices.append(770.0 - 0.20 * i)
+    prices.append(768.40 + 0.80)
+    swing = swing_from_path(prices)
+    assert swing.reversed_from_tradeable is True
+    assert swing.pending_direction == 1
+    assert swing.direction == 1
+    assert swing.had_tradeable is True
+    assert swing.last_tradeable_direction == -1
+    situation = classify_situation(
+        minutes_open=40,
+        session_range=1.60,
+        confirmed_impulse=bool(swing.tradeable or swing.reversed_from_tradeable),
+        had_tradeable_impulse=swing.had_tradeable,
+    )
+    assert situation == "IMPULSE"

@@ -17,6 +17,7 @@ IMPULSE_DOLLARS = 1.40
 REVERSAL_DOLLARS = 0.75
 RANGE_DAY_DOLLARS = 3.0
 MIN_RANGE_MINUTES = 45
+MIN_HOLD_MINUTES = 8.0
 WARMUP_MINUTES = 10
 ENTRY_STOP_MINUTES = 370  # 15:40 ET
 MIN_DEBIT_DOLLARS = 0.22
@@ -40,6 +41,14 @@ class SwingState:
     extreme: float
     direction: int
     confirmed: bool
+    tradeable: bool = False
+    had_tradeable: bool = False
+    reversed_from_tradeable: bool = False
+    last_tradeable_direction: int = 0
+    pending_direction: int = 0
+    leg_started_at: datetime | None = None
+    hold_minutes: float = 0.0
+    leg_steps: int = 0
 
 
 def empty_swing(spot: float = 0.0) -> SwingState:
@@ -51,73 +60,128 @@ def minutes_from_open(timestamp: datetime) -> int:
     return (eastern.hour * 60 + eastern.minute) - (9 * 60 + 30)
 
 
+def _hold_minutes(started_at: datetime | None, now: datetime | None, steps: int) -> float:
+    if now is not None and started_at is not None:
+        return max(0.0, (now - started_at).total_seconds() / 60.0)
+    return float(max(0, steps))
+
+
+def _with_leg(
+    *,
+    pivot: float,
+    extreme: float,
+    direction: int,
+    prev: SwingState,
+    now: datetime | None,
+    impulse: float,
+    reversed_from_tradeable: bool,
+    new_leg: bool,
+) -> SwingState:
+    move = abs(float(extreme) - float(pivot)) if direction else 0.0
+    confirmed = move >= impulse
+    if new_leg:
+        started = now
+        steps = 1
+        hold = 0.0 if now is not None else 1.0
+    else:
+        started = prev.leg_started_at if prev.leg_started_at is not None else now
+        steps = prev.leg_steps + 1
+        hold = _hold_minutes(started, now, steps)
+    tradeable = confirmed and hold >= MIN_HOLD_MINUTES
+    had = bool(prev.had_tradeable or prev.tradeable or tradeable)
+    if tradeable:
+        last_dir = direction
+        pending = 0
+    elif reversed_from_tradeable:
+        last_dir = prev.direction if prev.tradeable else prev.last_tradeable_direction
+        pending = direction
+    elif new_leg:
+        last_dir = prev.last_tradeable_direction
+        pending = 0
+    else:
+        last_dir = prev.last_tradeable_direction
+        pending = prev.pending_direction
+    if prev.tradeable and not tradeable and not reversed_from_tradeable and not new_leg:
+        last_dir = prev.direction
+    return SwingState(
+        pivot=pivot,
+        extreme=extreme,
+        direction=direction,
+        confirmed=confirmed,
+        tradeable=tradeable,
+        had_tradeable=had,
+        reversed_from_tradeable=reversed_from_tradeable,
+        last_tradeable_direction=last_dir,
+        pending_direction=pending,
+        leg_started_at=started,
+        hold_minutes=hold,
+        leg_steps=steps,
+    )
+
+
 def swing_step(
     state: SwingState,
     spot: float,
     *,
+    now: datetime | None = None,
     impulse: float = IMPULSE_DOLLARS,
     reversal: float = REVERSAL_DOLLARS,
 ) -> SwingState:
-    """Classic zigzag: $0.75 reverses the pivot; $1.40 confirms a tradeable leg."""
+    """Classic zigzag: $0.75 reverses the pivot; $1.40 plus 8 minutes is tradeable."""
     px = float(spot)
     if state.pivot <= 0:
         return empty_swing(px)
     if state.direction == 0:
-        if px > state.pivot:
-            return SwingState(
-                pivot=state.pivot,
-                extreme=px,
-                direction=1,
-                confirmed=px - state.pivot >= impulse,
-            )
-        if px < state.pivot:
-            return SwingState(
-                pivot=state.pivot,
-                extreme=px,
-                direction=-1,
-                confirmed=state.pivot - px >= impulse,
-            )
-        return state
-    if state.direction > 0:
-        if px >= state.extreme:
-            return SwingState(
-                pivot=state.pivot,
-                extreme=px,
-                direction=1,
-                confirmed=px - state.pivot >= impulse,
-            )
-        if state.extreme - px >= reversal:
-            return SwingState(
-                pivot=state.extreme,
-                extreme=px,
-                direction=-1,
-                confirmed=state.extreme - px >= impulse,
-            )
-        return SwingState(
-            pivot=state.pivot,
-            extreme=state.extreme,
-            direction=1,
-            confirmed=state.extreme - state.pivot >= impulse,
-        )
-    if px <= state.extreme:
-        return SwingState(
+        if px == state.pivot:
+            return state
+        direction = 1 if px > state.pivot else -1
+        return _with_leg(
             pivot=state.pivot,
             extreme=px,
-            direction=-1,
-            confirmed=state.pivot - px >= impulse,
+            direction=direction,
+            prev=state,
+            now=now,
+            impulse=impulse,
+            reversed_from_tradeable=False,
+            new_leg=True,
         )
-    if px - state.extreme >= reversal:
-        return SwingState(
+    extending = (state.direction > 0 and px >= state.extreme) or (
+        state.direction < 0 and px <= state.extreme
+    )
+    reversing = (state.direction > 0 and state.extreme - px >= reversal) or (
+        state.direction < 0 and px - state.extreme >= reversal
+    )
+    if extending:
+        return _with_leg(
+            pivot=state.pivot,
+            extreme=px,
+            direction=state.direction,
+            prev=state,
+            now=now,
+            impulse=impulse,
+            reversed_from_tradeable=False,
+            new_leg=False,
+        )
+    if reversing:
+        return _with_leg(
             pivot=state.extreme,
             extreme=px,
-            direction=1,
-            confirmed=px - state.extreme >= impulse,
+            direction=-state.direction,
+            prev=state,
+            now=now,
+            impulse=impulse,
+            reversed_from_tradeable=state.tradeable,
+            new_leg=True,
         )
-    return SwingState(
+    return _with_leg(
         pivot=state.pivot,
         extreme=state.extreme,
-        direction=-1,
-        confirmed=state.pivot - state.extreme >= impulse,
+        direction=state.direction,
+        prev=state,
+        now=now,
+        impulse=impulse,
+        reversed_from_tradeable=False,
+        new_leg=False,
     )
 
 
@@ -130,18 +194,30 @@ def swing_from_path(prices: list[float]) -> SwingState:
     return state
 
 
+def swing_from_tape(points: list[tuple[datetime, float]]) -> SwingState:
+    if not points:
+        return empty_swing()
+    state = empty_swing(float(points[0][1]))
+    for ts, px in points:
+        state = swing_step(state, px, now=ts)
+    return state
+
+
 def classify_situation(
     *,
     minutes_open: int,
     session_range: float | None,
     confirmed_impulse: bool,
     trend_day: bool = False,
+    had_tradeable_impulse: bool = False,
 ) -> str:
     """Causal regime. UNKNOWN means the tape is not in this snapshot; do not sit."""
     if minutes_open < 0 or minutes_open >= ENTRY_STOP_MINUTES:
         return "CLOSED"
     if confirmed_impulse:
         return "IMPULSE"
+    if had_tradeable_impulse:
+        return "TREND"
     if session_range is None:
         return "UNKNOWN"
     range_val = float(session_range)

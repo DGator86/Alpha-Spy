@@ -1059,8 +1059,8 @@ class Journal:
             return None, None
         return max(prices), min(prices)
 
-    def session_spy_path(self, captured_at: str) -> list[float]:
-        """Chronological RTH SPY prints up to `captured_at`. Causal zigzag input."""
+    def session_spy_tape(self, captured_at: str) -> list[tuple[datetime, float]]:
+        """Chronological RTH SPY prints up to `captured_at`, with timestamps."""
         try:
             as_of = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00")).astimezone(ET)
         except (TypeError, ValueError):
@@ -1090,7 +1090,11 @@ class Journal:
                 continue
             points.append((stamp, float(row[1])))
         points.sort(key=lambda item: item[0])
-        return [price for _, price in points]
+        return points
+
+    def session_spy_path(self, captured_at: str) -> list[float]:
+        """Chronological RTH SPY prints up to `captured_at`. Causal zigzag input."""
+        return [price for _, price in self.session_spy_tape(captured_at)]
 
     def latest_snapshot(self) -> dict[str, Any] | None:
         with self.session() as con:

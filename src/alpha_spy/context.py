@@ -9,7 +9,7 @@ import numpy as np
 from .config import SuiteConfig
 from .db import Journal
 from .session_tape import distance_bps, resolve_session_open_spy
-from .situation import classify_situation, minutes_from_open, swing_from_path
+from .situation import classify_situation, minutes_from_open, swing_from_path, swing_from_tape
 from .timeutil import ET
 
 
@@ -357,23 +357,34 @@ def build_market_context(
     spot = float(snapshot.get("spy_price") or 0.0)
     session_open_distance_bps = distance_bps(spot, session_open)
     captured_raw = str(snapshot.get("captured_at") or "")
-    path = journal.session_spy_path(captured_raw) if captured_raw else []
-    if spot > 0 and (not path or path[-1] != spot):
-        path = [*path, spot]
-    swing = swing_from_path(path)
-    session_range = None
-    if path:
-        session_range = max(path) - min(path)
     try:
         captured_dt = datetime.fromisoformat(captured_raw.replace("Z", "+00:00"))
         minutes_open = minutes_from_open(captured_dt)
     except (TypeError, ValueError):
+        captured_dt = None
         minutes_open = -1
+    tape = journal.session_spy_tape(captured_raw) if captured_raw else []
+    path = [px for _, px in tape] if tape else (journal.session_spy_path(captured_raw) if captured_raw else [])
+    if spot > 0 and (not path or path[-1] != spot):
+        path = [*path, spot]
+        if captured_dt is not None:
+            tape = [*tape, (captured_dt, spot)]
+    swing = swing_from_tape(tape) if tape else swing_from_path(path)
+    session_range = None
+    if path:
+        session_range = max(path) - min(path)
+    impulse_now = bool(swing.tradeable or swing.reversed_from_tradeable or swing.pending_direction)
     situation = classify_situation(
         minutes_open=minutes_open,
         session_range=session_range,
-        confirmed_impulse=swing.confirmed,
+        confirmed_impulse=impulse_now,
+        had_tradeable_impulse=swing.had_tradeable,
     )
+    situation_direction = swing.direction
+    if swing.pending_direction:
+        situation_direction = swing.pending_direction
+    elif not impulse_now and swing.last_tradeable_direction:
+        situation_direction = swing.last_tradeable_direction
     signals = {
         "risk_beta_spread": 0.5 * ((qqq - spy) + (iwm - spy)),
         "large_small_spread": qqq - iwm,
@@ -392,8 +403,10 @@ def build_market_context(
         "session_open_distance_bps": session_open_distance_bps,
         "session_range": session_range,
         "situation": situation,
-        "situation_direction": swing.direction,
-        "situation_confirmed_impulse": swing.confirmed,
+        "situation_direction": situation_direction,
+        "situation_confirmed_impulse": impulse_now,
+        "situation_tradeable": swing.tradeable,
+        "situation_had_tradeable": swing.had_tradeable,
         "futures_representation": "cash_proxies_SPY_QQQ_IWM",
         "rates_representation": "Treasury_ETF_proxies_SHY_IEF_TLT",
         **internal,
