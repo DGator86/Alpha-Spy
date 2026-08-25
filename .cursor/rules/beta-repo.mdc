@@ -1,0 +1,16 @@
+---
+description: Keep Beta-spy programming changes in the Beta-spy GitHub repo
+alwaysApply: true
+---
+
+# Beta-spy lives in its own repo
+
+Beta-spy is not part of Alpha-Spy. Its GitHub repo is https://github.com/DGator86/Beta-spy. The local clone is `C:\Users\Darrin Vogeli\Beta-spy`.
+
+When changing Beta programming (`session_policy.py`, `decision.py`, `ledger.py`, `live.py`, `options.py`, Beta tests, or anything under `/opt/beta-spy` on the VPS):
+
+1. Edit files in `C:\Users\Darrin Vogeli\Beta-spy`, not `AppData\Local\Temp\beta-spy-src` and not by patching the VPS alone.
+2. Commit and push those edits in the Beta-spy repo (same session as the Alpha-Spy commit when both change).
+3. Deploy to the VPS from that clone: copy into both `/opt/beta-spy/src/beta_spy/` and the Beta venv site-packages, then restart `beta-spy`.
+
+Do not leave Beta source only on the VPS or in a temp folder.
