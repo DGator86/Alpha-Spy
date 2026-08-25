@@ -100,12 +100,12 @@ def prefer_defined_debits(candidates: list[dict[str, Any]]) -> list[dict[str, An
     for row in candidates:
         name = str(row.get("strategy") or "")
         required = LONG_TO_DEBIT.get(name)
-        if required and required in constructed and row.get("status") == "ELIGIBLE":
-            prior = str(row.get("rejection_reason") or "")
-            row["status"] = "REJECTED"
-            row["rejection_reason"] = ",".join(
-                part for part in (prior, "defined_debit_preferred") if part
-            )
+        if not required or row.get("status") != "ELIGIBLE":
+            continue
+        prior = str(row.get("rejection_reason") or "")
+        reason = "defined_debit_preferred" if required in constructed else "naked_long_disabled"
+        row["status"] = "REJECTED"
+        row["rejection_reason"] = ",".join(part for part in (prior, reason) if part)
     return candidates
 
 

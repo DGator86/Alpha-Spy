@@ -168,7 +168,7 @@ def _position(opened_at: datetime) -> dict:
     }
 
 
-def test_professional_stop_tightens_and_horizon_is_hard_exit() -> None:
+def test_professional_stop_tightens_and_directional_holds_past_horizon() -> None:
     now = datetime(2026, 8, 10, 15, 0, tzinfo=UTC)
     signal = PositionSignal(forecast_return=0.001, breadth=0.60, iv_edge_gap=0.0, spot=100.10)
     early = evaluate_position(
@@ -183,8 +183,7 @@ def test_professional_stop_tightens_and_horizon_is_hard_exit() -> None:
     horizon = evaluate_position(
         _position(now - timedelta(minutes=16)), now=now, pnl=5.0, mfe=5.0, signal=signal
     )
-    assert horizon.should_exit is True
-    assert horizon.reason == "forecast_horizon_exit"
+    assert horizon.should_exit is False
 
     running = evaluate_position(
         _position(now - timedelta(minutes=16)), now=now, pnl=40.0, mfe=45.0, signal=signal

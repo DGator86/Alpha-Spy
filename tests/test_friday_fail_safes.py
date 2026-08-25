@@ -28,6 +28,7 @@ from alpha_spy.fail_safes import (
 from alpha_spy.features import compute_features
 from alpha_spy.position_management import PositionSignal, evaluate_position
 from alpha_spy.risk import AccountState, choose_decision
+from alpha_spy.strategy import generate_candidates
 
 
 def make_config(tmp_path: Path) -> SuiteConfig:
@@ -160,6 +161,15 @@ def test_defined_debit_rejects_naked_long() -> None:
     assert "defined_debit_preferred" in candidates[0]["rejection_reason"]
     assert candidates[2]["status"] == "REJECTED"
     assert candidates[3]["status"] == "ELIGIBLE"
+
+
+def test_naked_long_rejected_even_without_a_debit() -> None:
+    candidates = [
+        {"strategy": "LONG_PUT", "status": "ELIGIBLE", "width": None, "rejection_reason": None},
+    ]
+    prefer_defined_debits(candidates)
+    assert candidates[0]["status"] == "REJECTED"
+    assert "naked_long_disabled" in candidates[0]["rejection_reason"]
 
 
 def test_one_dollar_condor_against_spot_is_rejected() -> None:
@@ -305,3 +315,186 @@ def test_unmanageable_position_requests_flatten_and_blocks_entry(tmp_path: Path)
     assert decision["action"] == "NO_TRADE"
     assert decision["reason"] == "managed_position_unmanageable"
     assert journal.get_control("flatten_requested") == "true"
+
+
+def _chain(expiration: str = "2026-08-21") -> list[dict]:
+    rows = []
+    for right in ("C", "P"):
+        for strike in range(95, 106):
+            intrinsic = max(100.0 - strike, 0.0) if right == "C" else max(strike - 100.0, 0.0)
+            mid = max(0.40, intrinsic + 0.55)
+            rows.append(
+                {
+                    "symbol": f"SPY{right}{strike}",
+                    "expiration": expiration,
+                    "strike": float(strike),
+                    "right": right,
+                    "bid": mid - 0.02,
+                    "ask": mid + 0.02,
+                    "midpoint": mid,
+                    "volume": 1000,
+                    "open_interest": 5000,
+                    "iv": 0.25,
+                    "delta": 0.50 if right == "C" else -0.50,
+                    "gamma": 0.02,
+                }
+            )
+    return rows
+
+
+def test_strategy_builds_two_and_three_dollar_debits_not_ones(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.strategy.min_probability = 0.0
+    config.strategy.min_edge_dollars = -1000.0
+    config.strategy.min_edge_to_uncertainty = 0.0
+    config.strategy.require_positive_doubled_cost_ev = False
+    config.strategy.require_multi_horizon_alignment = False
+    config.risk.maximum_trade_risk_dollars = 100_000.0
+    prediction = {
+        "prediction_id": "P-WIDTH",
+        "feature_hash": "12345678" + "0" * 56,
+        "spy_price": 100.0,
+        "predicted_price": 102.0,
+        "predicted_low": 97.0,
+        "predicted_high": 103.0,
+        "expected_return": 0.02,
+        "sigma_return": 0.01,
+        "probability_up": 0.72,
+        "payload": {"input_health": {"required_ok": True}},
+    }
+    candidates = generate_candidates(config, prediction, _chain())
+    call_debits = [row for row in candidates if row["strategy"] == "CALL_DEBIT_SPREAD"]
+    widths = {float(row["width"]) for row in call_debits}
+    assert 2.0 in widths
+    assert 3.0 in widths
+    assert 1.0 not in widths
+    longs = [row for row in candidates if row["strategy"] == "LONG_CALL"]
+    assert longs
+    assert all(row["status"] == "REJECTED" for row in longs)
+    assert all("naked_long" in str(row["rejection_reason"]) for row in longs)
+    condors = [row for row in candidates if row["strategy"] == "IRON_CONDOR"]
+    assert condors
+    assert all(float(row["width"] or 0.0) >= 2.0 for row in condors)
+
+
+def test_session_tape_veto_rejects_calls_below_the_open(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    config.strategy.min_probability = 0.0
+    config.strategy.min_edge_dollars = -1000.0
+    config.strategy.min_edge_to_uncertainty = 0.0
+    config.strategy.require_positive_doubled_cost_ev = False
+    config.strategy.require_multi_horizon_alignment = False
+    config.risk.maximum_trade_risk_dollars = 100_000.0
+    prediction = {
+        "prediction_id": "P-VETO",
+        "feature_hash": "12345678" + "0" * 56,
+        "spy_price": 100.0,
+        "predicted_price": 102.0,
+        "predicted_low": 97.0,
+        "predicted_high": 103.0,
+        "expected_return": 0.02,
+        "sigma_return": 0.01,
+        "probability_up": 0.72,
+        "payload": {
+            "input_health": {"required_ok": True},
+            "market_context": {
+                "signals": {"session_open_distance_bps": -20.0, "auction_vwap_distance_bps": -18.0}
+            },
+        },
+    }
+    candidates = generate_candidates(config, prediction, _chain())
+    calls = [
+        row
+        for row in candidates
+        if row["strategy"] in {"LONG_CALL", "CALL_DEBIT_SPREAD"}
+    ]
+    assert calls
+    assert all("session_bias_against_calls" in str(row["rejection_reason"]) for row in calls)
+
+
+def _debit_vertical(opened_at: datetime, *, strategy: str = "PUT_DEBIT_SPREAD") -> dict:
+    right = "P" if "PUT" in strategy else "C"
+    long_strike = 762.0 if right == "P" else 765.0
+    short_strike = 760.0 if right == "P" else 768.0
+    return {
+        "position_id": "POS-DEBIT",
+        "opened_at": opened_at.isoformat().replace("+00:00", "Z"),
+        "strategy": strategy,
+        "quantity": 1,
+        "entry_value": 0.90,
+        "max_profit": 210.0,
+        "max_loss": 90.0,
+        "mfe": 0.0,
+        "mae": 0.0,
+        "legs": [
+            {
+                "symbol": f"{right}{long_strike:.0f}",
+                "right": right,
+                "strike": long_strike,
+                "side": "buy_to_open",
+                "quantity": 1,
+            },
+            {
+                "symbol": f"{right}{short_strike:.0f}",
+                "right": right,
+                "strike": short_strike,
+                "side": "sell_to_open",
+                "quantity": 1,
+            },
+        ],
+        "payload": {
+            "entry_kind": "debit",
+            "management_state": {},
+            "candidate": {
+                "payload": {
+                    "family": "directional_long",
+                    "entry_spot": 764.78,
+                    "forecast_sigma_return": 0.006,
+                    "forecast_expected_return": -0.002,
+                    "forecast_horizon_minutes": 15,
+                    "profit_unbounded": False,
+                }
+            },
+        },
+    }
+
+
+def test_debit_vertical_holds_past_the_fifteen_minute_forecast() -> None:
+    opened = datetime(2026, 8, 21, 14, 42, tzinfo=UTC)
+    now = opened + timedelta(minutes=71)
+    signal = PositionSignal(
+        forecast_return=-0.001,
+        breadth=0.40,
+        iv_edge_gap=0.0,
+        spot=763.50,
+        session_open=765.13,
+    )
+    decision = evaluate_position(
+        _debit_vertical(opened),
+        now=now,
+        pnl=40.0,
+        mfe=55.0,
+        signal=signal,
+    )
+    assert decision.should_exit is False
+
+
+def test_adverse_impulse_flattens_so_the_next_debit_can_fire() -> None:
+    opened = datetime(2026, 8, 21, 14, 42, tzinfo=UTC)
+    now = opened + timedelta(minutes=20)
+    signal = PositionSignal(
+        forecast_return=0.002,
+        breadth=0.62,
+        iv_edge_gap=0.0,
+        spot=766.25,
+        session_open=765.13,
+    )
+    decision = evaluate_position(
+        _debit_vertical(opened),
+        now=now,
+        pnl=-12.0,
+        mfe=5.0,
+        signal=signal,
+    )
+    assert decision.should_exit is True
+    assert decision.reason == "impulse_reversal_flatten"

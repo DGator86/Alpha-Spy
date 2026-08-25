@@ -1055,6 +1055,39 @@ class Journal:
             return None, None
         return max(prices), min(prices)
 
+    def session_spy_path(self, captured_at: str) -> list[float]:
+        """Chronological RTH SPY prints up to `captured_at`. Causal zigzag input."""
+        try:
+            as_of = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00")).astimezone(ET)
+        except (TypeError, ValueError):
+            return []
+        session = as_of.date()
+        rth_open = time(9, 30)
+        with self.session() as con:
+            rows = con.execute(
+                """
+                SELECT captured_at, spy_price FROM market_snapshots
+                WHERE spy_price IS NOT NULL AND captured_at <= ?
+                ORDER BY captured_at DESC LIMIT 800
+                """,
+                (str(captured_at),),
+            ).fetchall()
+        points: list[tuple[datetime, float]] = []
+        for row in rows:
+            try:
+                stamp = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00")).astimezone(ET)
+            except (TypeError, ValueError):
+                continue
+            if stamp.date() != session:
+                continue
+            if stamp.time().replace(tzinfo=None) < rth_open:
+                continue
+            if stamp > as_of:
+                continue
+            points.append((stamp, float(row[1])))
+        points.sort(key=lambda item: item[0])
+        return [price for _, price in points]
+
     def latest_snapshot(self) -> dict[str, Any] | None:
         with self.session() as con:
             row = con.execute(
