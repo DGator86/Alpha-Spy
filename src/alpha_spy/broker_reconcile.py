@@ -162,7 +162,12 @@ class BrokerReconciler:
                     mismatches[symbol] = {"expected": 0.0, "actual": actual_qty}
 
         reasons = []
-        if managed_orders:
+        blocking_orders = [
+            order
+            for order in managed_orders
+            if float(order.get("remaining_quantity") or 0.0) > 1e-9
+        ]
+        if blocking_orders:
             reasons.append("managed_broker_order_still_active")
         if mismatches:
             reasons.append("broker_position_mismatch")

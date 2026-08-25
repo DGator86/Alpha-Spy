@@ -28,10 +28,10 @@ def _et(day: datetime, hour: int, minute: int = 0) -> datetime:
 @pytest.mark.parametrize("day", [WINTER, SUMMER], ids=["EST", "EDT"])
 @pytest.mark.parametrize(
     "hour,minute,expected",
-    [(9, 30, False), (9, 40, True), (12, 0, True), (15, 15, True), (15, 16, False)],
+    [(9, 30, False), (9, 40, True), (12, 0, True), (15, 40, True), (15, 41, False)],
 )
 def test_entry_window_tracks_eastern_wall_clock(day, hour, minute, expected):
-    assert in_et_window(_et(day, hour, minute), "09:40", "15:15") is expected
+    assert in_et_window(_et(day, hour, minute), "09:40", "15:40") is expected
 
 
 @pytest.mark.parametrize("day", [WINTER, SUMMER], ids=["EST", "EDT"])

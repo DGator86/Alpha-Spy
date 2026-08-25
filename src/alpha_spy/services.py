@@ -207,8 +207,19 @@ class MarketService:
             self.journal.alert("warning", "No SPY expirations", "Tradier returned no expirations", "market")
             return
         today = et_now().date().isoformat()
-        eligible = [e for e in expirations if e >= today]
-        expiration = today if today in eligible else (eligible[0] if eligible else expirations[0])
+        if self.config.market.option_expiration_mode == "zero_dte":
+            if today not in expirations:
+                self.journal.alert(
+                    "warning",
+                    "No 0DTE SPY expiry",
+                    "Tradier has no same-session expiration; refusing chain fallback",
+                    "market",
+                )
+                return
+            expiration = today
+        else:
+            eligible = [e for e in expirations if e >= today]
+            expiration = today if today in eligible else (eligible[0] if eligible else expirations[0])
         options = [normalize_option(row) for row in client.option_chain("SPY", expiration, self.config.market.option_chain_greeks)]
         options = [o for o in options if abs(float(o["strike"]) - spy_price) <= max(30.0, spy_price * 0.06)]
         options = sorted(options, key=lambda o: (o["right"], o["strike"]))[: self.config.market.max_option_chain_rows]
@@ -997,6 +1008,18 @@ class SettlementService:
             except Exception as exc:
                 self.journal.heartbeat("settlement", "ERROR", None, str(exc))
                 self.journal.alert("critical", "Settlement cycle failed", str(exc), "settlement")
+                position = self.journal.open_position()
+                if position and at_or_after_et(utc_now(), self.config.risk.forced_flat_time_et):
+                    position.update(
+                        {
+                            "status": "CLOSED",
+                            "closed_at": utc_iso(),
+                            "exit_reason": "fail_safe_flatten",
+                            "unrealized_pnl": 0.0,
+                            "realized_pnl": float(position.get("unrealized_pnl") or 0.0),
+                        }
+                    )
+                    self.journal.upsert_position(position)
             sleep_interruptible(flag, 15.0)
 
     def run_once(self) -> str:

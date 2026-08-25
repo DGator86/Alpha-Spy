@@ -7,6 +7,7 @@ from typing import Any
 
 from .config import SuiteConfig
 from .db import Journal
+from .fail_safes import MANAGEMENT_ERROR_FLATTEN
 from .timeutil import ET, in_et_window, utc_iso, utc_now
 
 
@@ -329,7 +330,20 @@ def choose_decision(
 
     failed = [gate for gate in gates if not gate.passed]
     chosen: dict[str, Any] | None = None
-    if failed:
+    open_position = journal.open_position()
+    if open_position is not None:
+        errors = int(open_position.get("payload", {}).get("management_error_count") or 0)
+        if errors >= MANAGEMENT_ERROR_FLATTEN:
+            journal.set_control("flatten_requested", "true")
+            action = "NO_TRADE"
+            reason = "managed_position_unmanageable"
+        elif failed:
+            action = "NO_TRADE"
+            reason = failed[0].reason
+        else:
+            action = "NO_TRADE"
+            reason = "managed_position_already_open"
+    elif failed:
         action = "NO_TRADE"
         reason = failed[0].reason
     else:

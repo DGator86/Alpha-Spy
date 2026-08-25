@@ -10,8 +10,17 @@ import numpy as np
 from scipy.stats import norm
 
 from .config import SuiteConfig
+from .fail_safes import (
+    CONDOR_MIN_WING,
+    debit_width_ok,
+    prefer_defined_debits,
+    reject_unsafe_condors,
+)
 from .session_tape import structure_session_veto
+from .situation import debit_premium_ok, structure_situation_veto
 from .timeutil import ET, utc_iso
+
+PREFERRED_DEBIT_WIDTHS = (2.0, 3.0)
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,36 @@ def _next_strike(
     if not candidates:
         return None
     return min(candidates, key=lambda o: abs(float(o["strike"]) - base_strike))
+
+
+def _strike_at_width(
+    options: list[dict[str, Any]],
+    base_strike: float,
+    right: str,
+    direction: int,
+    desired_width: float,
+    max_width: float,
+) -> dict[str, Any] | None:
+    """Pick the listed strike nearest to ``base ± desired_width``, never the $1 neighbor.
+
+    Friday's book paid on $2–$3 debit verticals. The nearest listed strike is almost
+    always $1 wide, so nearest-neighbor construction made ``prefer_defined_debits``
+    a no-op and left the naked long in front.
+    """
+    eligible: list[dict[str, Any]] = []
+    for option in options:
+        if option["right"] != right:
+            continue
+        width = abs(float(option["strike"]) - base_strike)
+        if (float(option["strike"]) - base_strike) * direction <= 0:
+            continue
+        if width + 1e-9 < CONDOR_MIN_WING or width - 1e-9 > max_width:
+            continue
+        eligible.append(option)
+    if not eligible:
+        return None
+    target = base_strike + direction * desired_width
+    return min(eligible, key=lambda option: abs(float(option["strike"]) - target))
 
 
 def _leg_price(option: dict[str, Any], side: str) -> float:
@@ -336,20 +375,16 @@ def _evaluate_structure(
         if bearish and probability_up > 0.45:
             strategy_fit = False
             fit_reasons.append("bearish_probability_too_low")
-    market_context = payload.get("market_context") if isinstance(payload.get("market_context"), dict) else {}
-    session_signals = market_context.get("signals") if isinstance(market_context.get("signals"), dict) else {}
-    session_veto = structure_session_veto(
-        name,
-        family,
-        open_bps=session_signals.get("session_open_distance_bps"),
-        vwap_bps=session_signals.get("auction_vwap_distance_bps"),
-        bias_bps=config.strategy.session_bias_bps,
-        short_vol_bps=config.strategy.session_short_vol_bps,
-    )
-    if session_veto:
-        strategy_fit = False
-        fit_reasons.append(session_veto)
-    if family == "short_vol":
+        if family == "directional_credit":
+            strategy_fit = False
+            fit_reasons.append("directional_credits_disabled_tape_policy")
+        if name in {"LONG_CALL", "LONG_PUT"}:
+            strategy_fit = False
+            fit_reasons.append("naked_long_disabled_tape_policy")
+        if name in {"CALL_DEBIT_SPREAD", "PUT_DEBIT_SPREAD"} and not debit_width_ok(width):
+            strategy_fit = False
+            fit_reasons.append("debit_width_outside_preferred")
+    elif family == "short_vol":
         if q_vol <= p_vol * 1.03:
             strategy_fit = False
             fit_reasons.append("vol_not_rich_enough")
@@ -371,12 +406,45 @@ def _evaluate_structure(
         strategy_fit = False
         fit_reasons.append("range_debit_path_mismatch")
 
+    signals = (payload.get("market_context") or {}).get("signals") or {}
+    if isinstance(signals, dict):
+        veto = structure_session_veto(
+            name,
+            family,
+            open_bps=signals.get("session_open_distance_bps"),
+            vwap_bps=signals.get("auction_vwap_distance_bps"),
+            bias_bps=config.strategy.session_bias_bps,
+            short_vol_bps=config.strategy.session_short_vol_bps,
+        )
+        if veto:
+            strategy_fit = False
+            fit_reasons.append(veto)
+        situation_veto = structure_situation_veto(
+            name,
+            family,
+            situation=str(signals.get("situation") or "UNKNOWN"),
+            direction=int(signals.get("situation_direction") or 0),
+        )
+        if situation_veto:
+            strategy_fit = False
+            fit_reasons.append(situation_veto)
+    if name in {"CALL_DEBIT_SPREAD", "PUT_DEBIT_SPREAD"} and not debit_premium_ok(entry_price, width):
+        strategy_fit = False
+        fit_reasons.append("debit_premium_too_thin")
     score = expected_value / max(max_loss, 1.0) + 0.25 * (probability_profit - 0.5)
     if pnl_std > 1e-9:
         score += 0.05 * expected_value / pnl_std
-    score -= 0.10 * uncertainty_ratio
-    score += 0.05 if strategy_fit else -0.25
-    score += 0.05 * q_executable_edge / max(max_loss, 1.0)
+        score -= 0.10 * uncertainty_ratio
+        score += 0.05 if strategy_fit else -0.25
+        score += 0.05 * q_executable_edge / max(max_loss, 1.0)
+        if name in {"CALL_DEBIT_SPREAD", "PUT_DEBIT_SPREAD"}:
+            structure_width = float(width or 0.0)
+            if 2.0 <= structure_width <= 3.5:
+                score += 0.08
+            elif structure_width > 5.0:
+                score -= 0.06
+        elif name in {"LONG_CALL", "LONG_PUT"}:
+            score -= 0.04
 
     accepted = (
         expected_value >= config.strategy.min_edge_dollars * 100.0
@@ -525,21 +593,49 @@ def generate_candidates(
 
     if target_call:
         add("LONG_CALL", [(target_call, "buy_to_open")])
-        upper = _next_strike(options, float(target_call["strike"]), "C", 1, config.strategy.max_width)
-        if upper:
+        seen_call_widths: set[float] = set()
+        for desired in PREFERRED_DEBIT_WIDTHS:
+            upper = _strike_at_width(
+                options,
+                float(target_call["strike"]),
+                "C",
+                1,
+                desired,
+                config.strategy.max_width,
+            )
+            if not upper:
+                continue
+            width = float(upper["strike"]) - float(target_call["strike"])
+            if round(width, 2) in seen_call_widths or not debit_width_ok(width):
+                continue
+            seen_call_widths.add(round(width, 2))
             add(
                 "CALL_DEBIT_SPREAD",
                 [(target_call, "buy_to_open"), (upper, "sell_to_open")],
-                width=float(upper["strike"]) - float(target_call["strike"]),
+                width=width,
             )
     if target_put:
         add("LONG_PUT", [(target_put, "buy_to_open")])
-        lower = _next_strike(options, float(target_put["strike"]), "P", -1, config.strategy.max_width)
-        if lower:
+        seen_put_widths: set[float] = set()
+        for desired in PREFERRED_DEBIT_WIDTHS:
+            lower = _strike_at_width(
+                options,
+                float(target_put["strike"]),
+                "P",
+                -1,
+                desired,
+                config.strategy.max_width,
+            )
+            if not lower:
+                continue
+            width = float(target_put["strike"]) - float(lower["strike"])
+            if round(width, 2) in seen_put_widths or not debit_width_ok(width):
+                continue
+            seen_put_widths.add(round(width, 2))
             add(
                 "PUT_DEBIT_SPREAD",
                 [(target_put, "buy_to_open"), (lower, "sell_to_open")],
-                width=float(target_put["strike"]) - float(lower["strike"]),
+                width=width,
             )
 
     if low_put:
@@ -567,8 +663,22 @@ def generate_candidates(
         add("LONG_STRANGLE", [(strangle_call, "buy_to_open"), (strangle_put, "buy_to_open")])
 
     if low_put and high_call:
-        long_put = _next_strike(options, float(low_put["strike"]), "P", -1, config.strategy.max_width)
-        long_call = _next_strike(options, float(high_call["strike"]), "C", 1, config.strategy.max_width)
+        long_put = _strike_at_width(
+            options,
+            float(low_put["strike"]),
+            "P",
+            -1,
+            CONDOR_MIN_WING,
+            config.strategy.max_width,
+        )
+        long_call = _strike_at_width(
+            options,
+            float(high_call["strike"]),
+            "C",
+            1,
+            CONDOR_MIN_WING,
+            config.strategy.max_width,
+        )
         if long_put and long_call:
             add(
                 "IRON_CONDOR",
@@ -611,5 +721,7 @@ def generate_candidates(
                         width=max(left, right_width),
                     )
 
+    prefer_defined_debits(candidates)
+    reject_unsafe_condors(candidates, spot)
     candidates.sort(key=lambda c: c["score"], reverse=True)
     return candidates[: config.strategy.max_candidates_per_cycle]

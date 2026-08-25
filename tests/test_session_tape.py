@@ -70,6 +70,7 @@ def test_put_survives_15m_horizon_while_open_unreclaimed() -> None:
     position = _position(now - timedelta(minutes=16))
     position["strategy"] = "LONG_PUT"
     position["payload"]["candidate"]["payload"]["family"] = "directional_long"
+    position["payload"]["candidate"]["payload"]["entry_spot"] = 775.00
     signal = PositionSignal(
         forecast_return=-0.0004,
         breadth=0.40,
@@ -148,11 +149,11 @@ def test_opening_print_is_cached_from_journal() -> None:
     assert journal.control["rth_open_spy:2026-08-17"] == "776.220000"
 
 
-def test_horizon_exit_still_fires_without_session_bias() -> None:
+def test_directional_holds_past_horizon_without_session_bias() -> None:
     now = datetime(2026, 8, 10, 15, 0, tzinfo=UTC)
     signal = PositionSignal(forecast_return=0.001, breadth=0.60, iv_edge_gap=0.0, spot=100.10)
     horizon = evaluate_position(
         _position(now - timedelta(minutes=16)), now=now, pnl=5.0, mfe=5.0, signal=signal
     )
-    assert horizon.should_exit is True
-    assert horizon.reason == "forecast_horizon_exit"
+    assert horizon.should_exit is False
+    assert horizon.reason is None

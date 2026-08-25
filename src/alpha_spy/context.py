@@ -9,6 +9,7 @@ import numpy as np
 from .config import SuiteConfig
 from .db import Journal
 from .session_tape import distance_bps, resolve_session_open_spy
+from .situation import classify_situation, minutes_from_open, swing_from_path
 from .timeutil import ET
 
 
@@ -355,6 +356,24 @@ def build_market_context(
     session_open = resolve_session_open_spy(journal, snapshot)
     spot = float(snapshot.get("spy_price") or 0.0)
     session_open_distance_bps = distance_bps(spot, session_open)
+    captured_raw = str(snapshot.get("captured_at") or "")
+    path = journal.session_spy_path(captured_raw) if captured_raw else []
+    if spot > 0 and (not path or path[-1] != spot):
+        path = [*path, spot]
+    swing = swing_from_path(path)
+    session_range = None
+    if path:
+        session_range = max(path) - min(path)
+    try:
+        captured_dt = datetime.fromisoformat(captured_raw.replace("Z", "+00:00"))
+        minutes_open = minutes_from_open(captured_dt)
+    except (TypeError, ValueError):
+        minutes_open = -1
+    situation = classify_situation(
+        minutes_open=minutes_open,
+        session_range=session_range,
+        confirmed_impulse=swing.confirmed,
+    )
     signals = {
         "risk_beta_spread": 0.5 * ((qqq - spy) + (iwm - spy)),
         "large_small_spread": qqq - iwm,
@@ -371,6 +390,10 @@ def build_market_context(
         "large_trade_ratio": large_trade_ratio,
         "session_open_price": session_open,
         "session_open_distance_bps": session_open_distance_bps,
+        "session_range": session_range,
+        "situation": situation,
+        "situation_direction": swing.direction,
+        "situation_confirmed_impulse": swing.confirmed,
         "futures_representation": "cash_proxies_SPY_QQQ_IWM",
         "rates_representation": "Treasury_ETF_proxies_SHY_IEF_TLT",
         **internal,

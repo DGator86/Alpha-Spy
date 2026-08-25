@@ -5,7 +5,7 @@ from datetime import datetime, time
 from math import isfinite
 from typing import Any
 
-from .session_tape import distance_bps, session_agrees_with_direction
+from .situation import trail_ready
 from .timeutil import ET
 
 
@@ -91,7 +91,14 @@ def _opened_at(position: dict[str, Any]) -> datetime:
 
 
 def _entry_context(position: dict[str, Any]) -> dict[str, Any]:
-    return position.get("payload", {}).get("candidate", {}).get("payload", {})
+    payload = position.get("payload")
+    if not isinstance(payload, dict):
+        return {}
+    candidate = payload.get("candidate")
+    if not isinstance(candidate, dict):
+        return {}
+    inner = candidate.get("payload")
+    return inner if isinstance(inner, dict) else {}
 
 
 def evaluate_position(
@@ -138,13 +145,17 @@ def evaluate_position(
 
     short_put, long_put, short_call, long_call = _wing_geometry(position)
 
+    entry_spot = float(candidate_payload.get("entry_spot") or signal.spot)
+
     if entry_kind == "credit":
         if family == "short_vol" or "IRON_CONDOR" in strategy or "IRON_BUTTERFLY" in strategy:
             target_fraction = 0.45 if progress < 0.50 else 0.58
             target_pnl = max(2.50, target_fraction * credit)
             stop_amount = min(0.24 * max_loss, max(1.15 * credit, 0.10 * max_loss))
             stop_pnl = -stop_amount
-            if pnl >= target_pnl:
+            if abs(signal.spot - entry_spot) >= 1.40:
+                reason = "range_impulse_abort"
+            elif pnl >= target_pnl:
                 reason = "range_profit_target"
             elif pnl <= stop_pnl:
                 reason = "range_tail_stop"
@@ -194,45 +205,51 @@ def evaluate_position(
                 reason = "credit_time_stop"
 
     elif family == "directional_long":
+        defined_vertical = isfinite(finite_max_profit)
         stop_fraction = 0.50 if progress < 0.25 else (0.42 if progress < 0.60 else 0.33)
         stop_pnl = -stop_fraction * debit
         if pnl <= stop_pnl:
             reason = "debit_risk_stop"
-        if reason is None and isfinite(finite_max_profit):
+        if reason is None and direction and abs(signal.spot - entry_spot) >= 1.40:
+            adverse = direction * (entry_spot - signal.spot)
+            if adverse >= 1.40:
+                reason = "impulse_reversal_flatten"
+        if reason is None and defined_vertical:
             target_pnl = 0.78 * finite_max_profit
             if pnl >= target_pnl:
                 reason = "vertical_profit_target"
-        if mfe >= 0.35 * debit:
+        # Defined $2–$3 verticals hold the swing. Trailing 35% of debit chopped
+        # Wednesday's call into +$26 of a +$536 book. Trail only after half the wing.
+        if defined_vertical:
+            if trail_ready(mfe, finite_max_profit):
+                trail_fraction = 0.18 if mfe >= 0.70 * finite_max_profit else 0.28
+                trailing_floor = mfe - max(0.12 * debit, trail_fraction * mfe)
+                if reason is None and pnl <= trailing_floor:
+                    reason = "directional_profit_trail"
+        elif mfe >= 0.35 * debit:
             trail_fraction = 0.22 if mfe >= 1.25 * debit else 0.32
             trailing_floor = mfe - max(0.12 * debit, trail_fraction * mfe)
             if reason is None and pnl <= trailing_floor:
                 reason = "directional_profit_trail"
         invalid = _direction_invalid(direction, signal)
         thesis_valid = not invalid
-        if reason is None and elapsed >= 6 and invalid and pnl < 0.15 * debit:
-            reason = "direction_thesis_invalidation"
-        if reason is None and elapsed >= 10 and signal.iv_edge_gap < -0.0025 and pnl <= 0.05 * debit:
-            reason = "long_premium_edge_invalidation"
-        entry_spot = float(candidate_payload.get("entry_spot") or signal.spot)
+        if not defined_vertical:
+            if reason is None and elapsed >= 6 and invalid and pnl < 0.15 * debit:
+                reason = "direction_thesis_invalidation"
+            if reason is None and elapsed >= 10 and signal.iv_edge_gap < -0.0025 and pnl <= 0.05 * debit:
+                reason = "long_premium_edge_invalidation"
         sigma = max(float(candidate_payload.get("forecast_sigma_return") or 0.0), 1e-6)
         expected_move = max(entry_spot * sigma, 0.25)
         favorable_move = direction * (signal.spot - entry_spot) if direction else abs(signal.spot - entry_spot)
         entry_forecast = float(candidate_payload.get("forecast_expected_return") or 0.0)
         if (
             reason is None
+            and not defined_vertical
             and favorable_move / expected_move >= 0.95
             and abs(signal.forecast_return) < 0.30 * max(abs(entry_forecast), 0.00025)
             and pnl > 0.20 * debit
         ):
             reason = "directional_move_complete"
-        if (
-            reason is None
-            and progress >= 0.58
-            and mfe < 0.18 * debit
-            and pnl < -0.05 * debit
-            and not session_agrees_with_direction(direction, distance_bps(signal.spot, signal.session_open))
-        ):
-            reason = "directional_time_stop"
 
     elif family in {"long_vol", "convex_tail"}:
         stop_fraction = 0.48 if progress < 0.35 else (0.40 if progress < 0.70 else 0.32)
@@ -251,7 +268,6 @@ def evaluate_position(
         if reason is None and elapsed >= 10 and signal.iv_edge_gap < -0.0010 and abs(signal.forecast_return) < 0.00045 and pnl <= 0.05 * debit:
             reason = "volatility_thesis_invalidation"
             thesis_valid = False
-        entry_spot = float(candidate_payload.get("entry_spot") or signal.spot)
         sigma = max(float(candidate_payload.get("forecast_sigma_return") or 0.0), 1e-6)
         expected_move = max(entry_spot * sigma, 0.25)
         if reason is None and abs(signal.spot - entry_spot) / expected_move >= 1.10 and signal.iv_edge_gap <= 0.0 and pnl > 0.25 * debit:
@@ -297,20 +313,21 @@ def evaluate_position(
                 reason = "conditional_profit_trail"
 
     local_time = now.astimezone(ET).time().replace(tzinfo=None)
-    if reason is None and local_time >= time(15, 48):
+    if reason is None and local_time >= time(15, 50):
+        if family == "short_vol" or "IRON_CONDOR" in strategy or "IRON_BUTTERFLY" in strategy:
+            reason = "close_probe_exit"
+    if reason is None and local_time >= time(15, 55):
+        reason = "forced_flat_time"
+    elif reason is None and local_time >= time(15, 48):
         risk_basis = max(debit, credit, 1.0)
         if pnl < 0.30 * risk_basis or abs(signal.forecast_return) < 0.00025:
             reason = "late_session_risk_reduction"
 
-    # 15-minute forecasts still get a hard horizon exit unless the cash session
-    # is still working in the position's favor (open unreclaimed on a grind).
-    if reason is None and elapsed >= horizon:
-        open_bps = distance_bps(signal.spot, signal.session_open)
-        if not (
-            family == "directional_long"
-            and session_agrees_with_direction(direction, open_bps)
-        ):
-            reason = "forecast_horizon_exit"
+    # Directional 0DTE debits hold the session: trail, $1.40 reversal, vertical
+    # target, and 15:55 flatten. A 15-minute forecast clock chopped Friday's
+    # $2–$3 impulse book; session-agree hold on main is the weaker form of this.
+    if reason is None and elapsed >= horizon and family != "directional_long":
+        reason = "forecast_horizon_exit"
 
     state = {
         "evaluated_at": now.isoformat(),

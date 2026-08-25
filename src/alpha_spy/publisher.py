@@ -17,13 +17,24 @@ class DashboardPublisher:
     def configured(self) -> bool:
         return bool(self.token)
 
+    def _jsonable(self, value: Any) -> Any:
+        if isinstance(value, float):
+            if value != value or value in (float("inf"), float("-inf")):
+                return None
+            return value
+        if isinstance(value, dict):
+            return {key: self._jsonable(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._jsonable(item) for item in value]
+        return value
+
     def _post(self, path: str, body: dict[str, Any]) -> None:
         if not self.configured:
             return
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(
                 f"{self.base_url}{path}",
-                json=body,
+                json=self._jsonable(body),
                 headers={"X-Ingest-Token": self.token},
             )
             response.raise_for_status()
