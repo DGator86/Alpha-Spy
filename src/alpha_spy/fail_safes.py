@@ -39,6 +39,7 @@ def build_position_signal(**kwargs: Any) -> PositionSignal:
         spot=float(filtered.get("spot") or 0.0),
         session_open=float(filtered.get("session_open") or 0.0),
         vwap_distance_bps=float(filtered.get("vwap_distance_bps") or 0.0),
+        situation_tradeable=bool(filtered.get("situation_tradeable") or False),
     )
 
 

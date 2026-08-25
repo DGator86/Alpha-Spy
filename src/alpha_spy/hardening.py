@@ -606,6 +606,7 @@ class HardenedSettlementService(SettlementService):
             spot=float(snapshot.get("spy_price") or 0.0),
             session_open=session_open,
             vwap_distance_bps=float(context_signals.get("auction_vwap_distance_bps") or 0.0),
+            situation_tradeable=bool(context_signals.get("situation_tradeable")),
         )
         management = evaluate_position(position, now=now, pnl=pnl, mfe=mfe, signal=signal)
 

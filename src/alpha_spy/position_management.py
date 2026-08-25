@@ -17,6 +17,7 @@ class PositionSignal:
     spot: float
     session_open: float = 0.0
     vwap_distance_bps: float = 0.0
+    situation_tradeable: bool = False
 
 
 @dataclass(frozen=True)
@@ -153,7 +154,7 @@ def evaluate_position(
             target_pnl = max(2.50, target_fraction * credit)
             stop_amount = min(0.24 * max_loss, max(1.15 * credit, 0.10 * max_loss))
             stop_pnl = -stop_amount
-            if abs(signal.spot - entry_spot) >= 1.40:
+            if abs(signal.spot - entry_spot) >= 1.40 and signal.situation_tradeable:
                 reason = "range_impulse_abort"
             elif pnl >= target_pnl:
                 reason = "range_profit_target"

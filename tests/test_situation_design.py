@@ -36,8 +36,14 @@ def test_monday_chop_is_range_not_impulse() -> None:
     ]
     swing = swing_from_path(path)
     assert swing.confirmed is False
-    situation = classify_situation(
+    waiting = classify_situation(
         minutes_open=46,
+        session_range=max(path) - min(path),
+        confirmed_impulse=swing.confirmed,
+    )
+    assert waiting == "WATCH"
+    situation = classify_situation(
+        minutes_open=91,
         session_range=max(path) - min(path),
         confirmed_impulse=swing.confirmed,
     )

@@ -136,6 +136,7 @@ def test_condor_aborts_on_dollar_forty_impulse() -> None:
         iv_edge_gap=0.0,
         spot=766.45,
         session_open=765.13,
+        situation_tradeable=True,
     )
     decision = evaluate_position(
         _condor_position(opened, entry_spot=764.78),
@@ -147,6 +148,28 @@ def test_condor_aborts_on_dollar_forty_impulse() -> None:
     assert decision.should_exit is True
     assert decision.reason == "range_impulse_abort"
     assert spot_impulse_from_entry(764.78, 766.45) is True
+
+
+def test_condor_holds_dollar_forty_spike_until_tradeable() -> None:
+    opened = datetime(2026, 8, 24, 14, 20, tzinfo=UTC)
+    now = opened + timedelta(minutes=3)
+    signal = PositionSignal(
+        forecast_return=0.0,
+        breadth=0.50,
+        iv_edge_gap=0.0,
+        spot=646.90,
+        session_open=645.40,
+        situation_tradeable=False,
+    )
+    decision = evaluate_position(
+        _condor_position(opened, entry_spot=645.40),
+        now=now,
+        pnl=8.0,
+        mfe=8.0,
+        signal=signal,
+    )
+    assert decision.should_exit is False
+    assert decision.reason != "range_impulse_abort"
 
 
 def test_defined_debit_rejects_naked_long() -> None:
