@@ -6,6 +6,7 @@ from pathlib import Path
 from .config import load_config
 from .db import Journal
 from .v2_engine import V2EngineService
+from .v2_settlement import V2SettlementService
 from .v2_streaming_market import V2StreamingMarketService
 
 
@@ -20,8 +21,9 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("market")
     engine = sub.add_parser("engine")
     engine.add_argument("--beta-state-url", default=None)
+    sub.add_parser("settlement")
     once = sub.add_parser("run-once")
-    once.add_argument("service", choices=("market", "engine"))
+    once.add_argument("service", choices=("market", "engine", "settlement"))
     once.add_argument("--beta-state-url", default=None)
     return root
 
@@ -59,10 +61,13 @@ def main() -> None:
             beta_state_url=args.beta_state_url,
         ).run_forever()
         return
+    if args.command == "settlement":
+        V2SettlementService(config, journal).run_forever()
+        return
     if args.command == "run-once":
         if args.service == "market":
             print(V2StreamingMarketService(config, journal).run_once())
-        else:
+        elif args.service == "engine":
             print(
                 V2EngineService(
                     config,
@@ -70,6 +75,8 @@ def main() -> None:
                     beta_state_url=args.beta_state_url,
                 ).run_once()
             )
+        else:
+            print(V2SettlementService(config, journal).run_once())
 
 
 if __name__ == "__main__":
