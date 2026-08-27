@@ -19,9 +19,10 @@ from .hardening import (
 from .prediction import create_prediction_bundle
 from .regime import estimate_dealer_gamma_proxy, estimate_option_activity_proxy
 from .risk import choose_decision, no_trade_decision
+from .services import append_jsonl
 from .strategy_v2 import generate_candidates_v2
 from .timeutil import ET, et_now
-from .v2_service import V2EngineService
+from .v2_service import apply_preview_fees, record_chain_tape
 
 
 class V2HardenedEngineService(HardenedEngineService):
@@ -130,18 +131,16 @@ class V2HardenedEngineService(HardenedEngineService):
         prediction.setdefault("payload", {})["architecture"] = "alpha-beta-v2-liquidity-first"
         prediction["model_version"] = "alpha-beta-v2.0.0"
 
-        # Persist every horizon, then replace/reinsert the primary member with
-        # its Beta V2 context so replay sees exactly what the decision saw.
         for member in predictions:
             if member["prediction_id"] == prediction["prediction_id"]:
                 self.journal.insert_prediction(prediction)
             else:
                 self.journal.insert_prediction(member)
 
-        chain_hash = V2EngineService._record_chain_tape(self, chain, options, prediction)
+        chain_hash = record_chain_tape(self.config, chain, options, prediction)
         prediction.setdefault("payload", {})["v2_chain_sha256"] = chain_hash
         candidates = generate_candidates_v2(self.config, prediction, options)
-        V2EngineService._apply_preview_fees(self, candidates)
+        apply_preview_fees(self.config, candidates)
         candidates.sort(
             key=lambda candidate: (
                 candidate.get("status") == "ELIGIBLE",
@@ -210,8 +209,6 @@ class V2HardenedEngineService(HardenedEngineService):
                 payload={"beta_v2": beta_payload},
             )
         elif not _on_entry_grid(self.config, snapshot["captured_at"]):
-            # V2 deliberately removes the legacy off-grid impulse override. The
-            # model is evaluated every minute, but entries are reproducible 5m anchors.
             decision = no_trade_decision(
                 prediction,
                 feature,
@@ -263,8 +260,6 @@ class V2HardenedEngineService(HardenedEngineService):
 
         self.journal.set_control("last_engine_snapshot_id", snapshot["snapshot_id"])
         self._publish(snapshot, feature, prediction, account)
-        from .services import append_jsonl
-
         append_jsonl(
             self.config.paths.state_root
             / "candidates"
