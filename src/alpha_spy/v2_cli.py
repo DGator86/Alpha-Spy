@@ -6,14 +6,14 @@ from pathlib import Path
 from .config import load_config
 from .db import Journal
 from .v2_engine import V2EngineService
-from .v2_settlement import V2SettlementService
+from .v2_settlement_agent import V2SettlementService
 from .v2_streaming_market import V2StreamingMarketService
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="alpha-spy-v2",
-        description="Alpha-SPY V2 paper/research runtime",
+        description="Alpha-SPY V2 closed-loop paper/research trader runtime",
     )
     root.add_argument("--config", default="/etc/alpha-spy/config.yaml")
     root.add_argument("--state-root", default=None)
@@ -21,7 +21,8 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("market")
     engine = sub.add_parser("engine")
     engine.add_argument("--beta-state-url", default=None)
-    sub.add_parser("settlement")
+    settlement = sub.add_parser("settlement")
+    settlement.add_argument("--beta-state-url", default=None)
     once = sub.add_parser("run-once")
     once.add_argument("service", choices=("market", "engine", "settlement"))
     once.add_argument("--beta-state-url", default=None)
@@ -39,7 +40,8 @@ def _config(args: argparse.Namespace):
         config.paths.model_dir = root / "models"
         config.paths.report_dir = root / "reports"
         config.create_directories()
-    # V2 is paper/sandbox only until blind validation passes.
+    # The authoritative closed-loop trader is paper/sandbox only until forward
+    # actual-chain evidence earns a separate deployment decision.
     config.trading.paper_mode = True
     if config.tradier.environment == "production":
         config.trading.submit_orders = False
@@ -62,7 +64,11 @@ def main() -> None:
         ).run_forever()
         return
     if args.command == "settlement":
-        V2SettlementService(config, journal).run_forever()
+        V2SettlementService(
+            config,
+            journal,
+            beta_state_url=args.beta_state_url,
+        ).run_forever()
         return
     if args.command == "run-once":
         if args.service == "market":
@@ -76,7 +82,13 @@ def main() -> None:
                 ).run_once()
             )
         else:
-            print(V2SettlementService(config, journal).run_once())
+            print(
+                V2SettlementService(
+                    config,
+                    journal,
+                    beta_state_url=args.beta_state_url,
+                ).run_once()
+            )
 
 
 if __name__ == "__main__":
