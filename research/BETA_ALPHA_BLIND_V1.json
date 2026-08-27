@@ -1,0 +1,54 @@
+{
+  "experiment": "BETA_ALPHA_BLIND_V1_FROZEN",
+  "status": "FAILED_BLIND_TEST_RESEARCH_ONLY",
+  "train_last_day": "2026-08-17",
+  "blind_first_day": "2026-08-18",
+  "blind_last_day": "2026-08-25",
+  "frozen_config_sha256": "ac67ca346e7fd069035e043b3e0e220b780732c01260a09299cdba6bc0a9ed56",
+  "locked_trade_list_sha256": "443ab474cc19008f7c2ed4697f745a222c4e7e5efd7c0cc90f7bfc62b6ba4dd0",
+  "architecture": {
+    "beta": "high_selectivity_opportunity_detector_and_probabilistic_prior_only",
+    "alpha": "final_P_Q_defined_risk_strategy_tournament_and_NO_TRADE_authority",
+    "beta_direction_is_strategy_authority": false
+  },
+  "frozen_beta_gate": {
+    "p15_conviction": 0.65,
+    "min_abs_predicted_15m_bps": 5.0,
+    "horizon_rule": "15m direction agrees with at least one of 5m or 30m",
+    "bull_breadth5_min": 0.52,
+    "bear_breadth5_max": 0.48,
+    "entry_window_et": "10:00-15:40"
+  },
+  "frozen_alpha_gate": {
+    "scope": "same_expiration_0DTE_defined_risk_only",
+    "maximum_trade_risk_dollars": 100.0,
+    "max_debit": 3.5,
+    "min_credit": 0.1,
+    "minimum_probability_profit": 0.60,
+    "minimum_expected_value_dollars": 3.0,
+    "require_positive_doubled_cost_ev": true,
+    "hold_minutes": 15,
+    "baseline_iv": 0.13,
+    "slippage_per_leg_side": 0.01,
+    "fee_per_contract_side": 0.65
+  },
+  "blind_result": {
+    "trades": 4,
+    "direction_accuracy": 0.25,
+    "baseline_13pct_iv_1c_pnl": -55.6026,
+    "doubled_friction_pnl": -63.6026,
+    "iv20_pnl": -81.2770,
+    "iv30_pnl": -104.1156,
+    "baseline_winners": 1,
+    "baseline_losers": 3,
+    "max_drawdown_baseline": -59.3318
+  },
+  "locked_trades": [
+    {"date":"2026-08-18","strategy":"LONG_PUT","strike":766.0,"baseline_pnl":-11.87},
+    {"date":"2026-08-19","strategy":"LONG_PUT","strike":769.0,"baseline_pnl":-26.99},
+    {"date":"2026-08-20","strategy":"LONG_CALL","strike":769.0,"baseline_pnl":-32.34},
+    {"date":"2026-08-21","strategy":"LONG_CALL","strike":767.0,"baseline_pnl":15.60}
+  ],
+  "no_trade_days": ["2026-08-24", "2026-08-25"],
+  "interpretation": "Blind V1 failed. Keep the architecture experiment auditable, do not tune these thresholds on Aug 18-25, and do not merge/deploy this branch as a validated policy."
+}
