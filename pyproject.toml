@@ -34,6 +34,7 @@ dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1", "tabulate>=0.9,<1"]
 
 [project.scripts]
 alpha-spy = "alpha_spy.cli:main"
+alpha-spy-v2 = "alpha_spy.v2_runtime:main"
 spy-alpha = "alpha_spy.research.cli:app"
 spy-alpha-dashboard = "alpha_spy.dashboard.cli:main"
 
@@ -63,51 +64,23 @@ line-length = 110
 # reintroduce findings in a codebase that was clean the day before.
 [tool.ruff.lint]
 select = [
-  "E",    # pycodestyle errors
-  "W",    # pycodestyle warnings
-  "F",    # pyflakes
-  "I",    # import sorting
-  "UP",   # pyupgrade — the suite requires Python 3.11+
-  "B",    # bugbear
-  "C4",   # comprehensions
-  "SIM",  # simplify
-  "RUF",  # ruff-specific
+  "E",
+  "W",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "C4",
+  "SIM",
+  "RUF",
 ]
-ignore = [
-  # Line length is advisory here. The research and strategy modules carry long
-  # literal tables and report strings; enforcing 110 would rewrite 542 lines of
-  # trading logic for no behavioural gain. line-length above still guides
-  # formatters.
-  "E501",
-]
-
-# The research drivers write markdown reports whose prose uses a real en dash.
-# That is intended typography in report text, not a homoglyph mistake.
+ignore = ["E501"]
 allowed-confusables = ["–"]
 
-# Deliberately not selected, because clearing them would mean changing
-# behaviour in live trading code rather than tidying it:
-#   BLE001  blind-except      — the market, universe and backup paths catch
-#                               broad exceptions on purpose so a bad feed
-#                               degrades data health instead of killing a
-#                               service mid-session.
-#   S110    try-except-pass   — same fail-soft intent.
-#   FURB    refurb            — opinionated rewrites over timestamp parsing in
-#                               the audit tape.
-#   PYI     stub-file rules   — no stub files in this project.
-
 [tool.ruff.lint.per-file-ignores]
-# The research drivers put <repo>/src on sys.path before importing the package,
-# so their package imports necessarily follow module-level code. Marking each
-# import individually would force every one of them onto multiple lines.
 "examples/**" = ["E402"]
 
 [tool.ruff.lint.flake8-bugbear]
-# B008 guards against a mutable default shared across calls. Each of these is
-# either immutable or framework API, so the shared instance is intentional:
-#   typer.Argument/Option  parameter metadata, evaluated at decoration time
-#   pandas.Timedelta       immutable scalar
-#   ScanSettings           @dataclass(frozen=True), only ever read
 extend-immutable-calls = [
   "typer.Argument",
   "typer.Option",
