@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from .config import load_config
 from .db import Journal
 from .v2_engine import V2EngineService
+from .v2_lifecycle_backfill import backfill_lifecycle_from_frozen_predictions
 from .v2_settlement_agent import V2SettlementService
 from .v2_streaming_market import V2StreamingMarketService
 
@@ -23,6 +25,8 @@ def parser() -> argparse.ArgumentParser:
     engine.add_argument("--beta-state-url", default=None)
     settlement = sub.add_parser("settlement")
     settlement.add_argument("--beta-state-url", default=None)
+    backfill = sub.add_parser("lifecycle-backfill")
+    backfill.add_argument("--limit", type=int, default=25000)
     once = sub.add_parser("run-once")
     once.add_argument("service", choices=("market", "engine", "settlement"))
     once.add_argument("--beta-state-url", default=None)
@@ -69,6 +73,10 @@ def main() -> None:
             journal,
             beta_state_url=args.beta_state_url,
         ).run_forever()
+        return
+    if args.command == "lifecycle-backfill":
+        result = backfill_lifecycle_from_frozen_predictions(journal, limit=args.limit)
+        print(json.dumps(result, indent=2, sort_keys=True))
         return
     if args.command == "run-once":
         if args.service == "market":
