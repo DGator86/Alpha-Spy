@@ -51,18 +51,23 @@ def manage_trade(
     current_iv: float | None,
     entry_iv: float | None,
     already_scaled: bool = False,
+    already_added: bool = False,
+    max_quantity: int | None = None,
 ) -> TradeManagementDecision:
-    """Implement Steps 11-13: continuously reassess thesis, timing and economics.
+    """Implement Steps 11-13: reassess thesis, timing, economics and sizing.
 
     Management uses fair combo P&L for economic invalidation and target logic.
     Liquidation P&L is recorded separately and only becomes realized when an exit is
     actually executed, preventing multi-leg bid/ask width from manufacturing stops.
+    Scale-ins are permitted only when evidence strengthens and the trade is not
+    losing; the agent never averages down merely because price moved against it.
     """
     regime = _regime(beta)
     current_regime = str(regime.get("current_regime") or "UNDEFINED")
     regime_defined = bool(regime.get("definable"))
     regime_conf = _num(regime.get("confidence"))
     persistence15 = _num(regime.get("persistence_15"))
+    persistence30 = _num(regime.get("persistence_30"))
     successor = str(regime.get("most_likely_successor") or "UNDEFINED")
     successor_probs = regime.get("successor_probabilities") or {}
     if not isinstance(successor_probs, dict):
@@ -76,7 +81,11 @@ def manage_trade(
     expected_time = _num(thesis.get("expected_time_to_profit_minutes"), 15.0)
     time_stop = _num(thesis.get("time_stop_minutes"), expected_time + 5.0)
     entry_regime = str(thesis.get("regime") or "UNDEFINED")
+    entry_conf = _num(thesis.get("regime_confidence"))
+    entry_persistence15 = _num(thesis.get("persistence_15"))
+    entry_persistence30 = _num(thesis.get("persistence_30"))
     entry_successor = str(thesis.get("most_likely_successor") or "UNDEFINED")
+    allowed_max_quantity = max(1, int(max_quantity or thesis.get("maximum_quantity") or 1))
     hgb = (beta or {}).get("hgb_direction") or {}
     state = (beta or {}).get("predictive_state") or {}
     pbig15 = _num(state.get("p_big_15")) if isinstance(state, dict) else 0.0
@@ -91,11 +100,16 @@ def manage_trade(
         "liquidation_pnl": liquidation_pnl,
         "mfe": mfe,
         "quantity": quantity,
+        "maximum_quantity": allowed_max_quantity,
         "entry_regime": entry_regime,
         "current_regime": current_regime,
         "regime_defined": regime_defined,
+        "entry_regime_confidence": entry_conf,
         "regime_confidence": regime_conf,
+        "entry_persistence_15": entry_persistence15,
         "persistence_15": persistence15,
+        "entry_persistence_30": entry_persistence30,
+        "persistence_30": persistence30,
         "entry_successor": entry_successor,
         "current_successor": successor,
         "successor_probabilities": successor_probs,
@@ -138,9 +152,9 @@ def manage_trade(
         action = BAIL if fair_pnl >= 0 else SELL_FOR_LOSS
         return result(action, "regime_became_undefined", False, exit_=True)
 
+    hgb_eligible = isinstance(hgb, dict) and bool(hgb.get("eligible"))
+    hgb_direction = str(hgb.get("direction") or "") if isinstance(hgb, dict) else ""
     if playbook == "DIRECTIONAL_MOMENTUM":
-        hgb_eligible = isinstance(hgb, dict) and bool(hgb.get("eligible"))
-        hgb_direction = str(hgb.get("direction") or "") if isinstance(hgb, dict) else ""
         opposite = hgb_eligible and hgb_direction and hgb_direction != direction
         opposite_successor = "DIRECTIONAL_DOWN" if direction == "BULLISH" else "DIRECTIONAL_UP"
         opposite_prob = _num(successor_probs.get(opposite_successor))
@@ -176,6 +190,30 @@ def manage_trade(
             action = BAIL if fair_pnl >= 0 else SELL_FOR_LOSS
             return result(action, "forecast_successor_regime_changed", False, exit_=True)
 
+    # Scale in only on strengthening evidence, never on a losing trade. Entry is
+    # deliberately one unit so the market must confirm before more risk is added.
+    strengthening = (
+        persistence15 >= entry_persistence15 + 0.08
+        or persistence30 >= entry_persistence30 + 0.08
+        or regime_conf >= entry_conf + 0.10
+    )
+    directional_confirmed = playbook != "DIRECTIONAL_MOMENTUM" or (
+        hgb_eligible and hgb_direction == direction
+    )
+    range_confirmed = playbook != "LATE_RANGE_CARRY" or (
+        current_regime == "QUIET" and pbig15 <= 0.30 and (iv_change is None or iv_change <= 0.01)
+    )
+    if (
+        not already_added
+        and quantity < allowed_max_quantity
+        and fair_pnl >= 0.0
+        and 2.0 <= elapsed_minutes <= max(5.0, 0.65 * expected_time)
+        and strengthening
+        and directional_confirmed
+        and range_confirmed
+    ):
+        return result(ADD, "evidence_strengthened_scale_in_without_averaging_down", True, exit_=False, scale=1)
+
     if elapsed_minutes >= expected_time and fair_pnl <= 0.0:
         return result(SELL_FOR_LOSS, "trade_failed_on_expected_time_to_profit", False, exit_=True)
 
@@ -183,8 +221,6 @@ def manage_trade(
         action = TAKE_PROFIT if fair_pnl > 0 else SELL_FOR_LOSS
         return result(action, "hard_playbook_time_stop", fair_pnl > 0, exit_=True)
 
-    # A material change that does not invalidate the edge asks the engine to
-    # reconsider the expression after this position is protected/closed.
     if current_regime != entry_regime and current_regime != "UNDEFINED" and successor == entry_successor:
         return result(ADJUST, "regime_changed_but_successor_thesis_survives", True, exit_=False)
 
