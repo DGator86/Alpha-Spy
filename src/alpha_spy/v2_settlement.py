@@ -11,7 +11,11 @@ from .position_management import (
     evaluate_position as legacy_evaluate_position,
 )
 
-HGB_AUTHORITY = "beta_v2_hgb_blocked_walk_forward"
+FIXED_HORIZON_AUTHORITIES = {
+    "beta_v2_hgb_blocked_walk_forward",
+    "alpha_v2_state_pq_challenger",
+    "alpha_v2_state_pq_state_only",
+}
 
 
 def _candidate_context(position: dict[str, Any]) -> dict[str, Any]:
@@ -29,16 +33,10 @@ def evaluate_v2_position(
     mfe: float,
     signal: PositionSignal,
 ) -> PositionManagementDecision:
-    """Match the validated HGB trade to its exact fixed T+15 research horizon.
-
-    Legacy positions retain the existing professional dynamic manager. HGB V2
-    verticals deliberately do not take an early model-derived stop/target/trail:
-    the profitable evidence was generated with a fixed 15-minute liquidation.
-    Operator flatten, broker fail-safe, and the global 15:55 forced-flat remain
-    outside this function in HardenedSettlementService.
-    """
+    """Enforce the fixed T+15 management contract for validated V2 authority paths."""
     context = _candidate_context(position)
-    if str(context.get("authority") or "") != HGB_AUTHORITY:
+    authority = str(context.get("authority") or "")
+    if authority not in FIXED_HORIZON_AUTHORITIES:
         return legacy_evaluate_position(position, now=now, pnl=pnl, mfe=mfe, signal=signal)
 
     opened = datetime.fromisoformat(str(position["opened_at"]).replace("Z", "+00:00"))
@@ -57,8 +55,8 @@ def evaluate_v2_position(
             "evaluated_at": now.isoformat(),
             "elapsed_minutes": elapsed,
             "progress": min(1.5, elapsed / horizon),
-            "family": "directional_long",
-            "authority": HGB_AUTHORITY,
+            "family": str(context.get("family") or "v2"),
+            "authority": authority,
             "fixed_horizon": True,
             "forecast_horizon_minutes": horizon,
             "target_pnl": None,
@@ -74,7 +72,7 @@ def evaluate_v2_position(
 
 
 class V2SettlementService(HardenedSettlementService):
-    """Settlement daemon that enforces the frozen HGB T+15 management contract."""
+    """Settlement daemon that keeps every authorized V2 trade on its tested horizon."""
 
     def _manage_open_position(self) -> str:
         original = hardening_module.evaluate_position
