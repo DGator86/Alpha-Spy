@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import json
+import statistics
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,28 +13,22 @@ from .features import compute_features
 from .prediction import create_prediction
 from .risk import choose_decision, no_trade_decision
 from .tradier import TradierClient, preview_fees
-from .v2_hgb_vertical import build_hgb_vertical_candidate
+from .v2_learning import playbook_history
 from .v2_services import V2EngineService as _BaseV2EngineService
-from .v2_state_pq import (
-    authorize_state_pq_challenger,
-    find_primary_valuation,
-    generate_state_pq_candidates,
-)
+from .v2_state_pq import generate_state_pq_candidates
+from .v2_trader_agent import build_agent_plan
 
 DEFAULT_BETA_V2_STATE_URL = "http://127.0.0.1:8790/api/state"
-HGB_AUTHORITY = "beta_v2_hgb_blocked_walk_forward"
-STATE_PQ_CHALLENGER_AUTHORITY = "alpha_v2_state_pq_challenger"
-STATE_PQ_STATE_ONLY_AUTHORITY = "alpha_v2_state_pq_state_only"
+TRADER_AGENT_AUTHORITY = "alpha_v2_closed_loop_trader_agent"
 
 
 class V2EngineService(_BaseV2EngineService):
-    """Authoritative Alpha V2 state/P-Q champion-challenger engine.
+    """Authoritative closed-loop Alpha trading-agent engine.
 
-    Beta publishes causal market evidence only. Alpha constructs empirical P from
-    Beta's weighted historical analog outcomes while preserving the observed Q
-    surface, values the complete 47-family bounded-risk universe, and lets a
-    challenger replace the validated HGB two-point vertical only after it survives
-    the execution-stress hurdle that killed the unrestricted allocator.
+    Decision order is deliberately fixed:
+    regime -> duration -> transition -> monetizable edge -> playbook -> entry timing
+    -> exact option expression -> implementation economics -> execution.
+    Positive option EV by itself is never permission to trade.
     """
 
     def __init__(self, config, journal, *, beta_state_url: str | None = None, **kwargs: Any):
@@ -42,15 +38,12 @@ class V2EngineService(_BaseV2EngineService):
             beta_state_url=beta_state_url or DEFAULT_BETA_V2_STATE_URL,
             **kwargs,
         )
+        # Multiple independent setups may be traded sequentially. This is a hard
+        # operational guardrail, not a strategy rule; only one managed position may
+        # still be open at a time through the normal risk gates.
+        self.config.risk.maximum_trades_per_day = max(8, int(self.config.risk.maximum_trades_per_day))
 
     def _beta_opportunity(self, now: datetime) -> tuple[dict[str, Any] | None, str | None]:
-        """Accept either a validated HGB trigger or a mature predictive state.
-
-        HGB remains the incumbent directional authority. A ready predictive-state
-        distribution is still allowed through so non-directional P/Q challengers
-        can be counterfactually valued and, under deliberately strict thresholds,
-        can eventually earn execution authority.
-        """
         try:
             response = httpx.get(self.beta_state_url, timeout=2.5)
             response.raise_for_status()
@@ -76,19 +69,30 @@ class V2EngineService(_BaseV2EngineService):
         if opportunity.get("strategy_authority") not in (False, None):
             return None, "beta_v2_strategy_authority_violation"
 
+        state_payload = opportunity.get("predictive_state") or {}
+        regime = opportunity.get("regime_forecast") or {}
+        state_ready = isinstance(state_payload, dict) and bool(state_payload.get("ready"))
+        regime_ready = isinstance(regime, dict) and bool(regime.get("definable"))
         hgb = opportunity.get("hgb_direction") or {}
         hgb_ready = isinstance(hgb, dict) and bool(hgb.get("eligible"))
-        predictive_state = opportunity.get("predictive_state") or {}
-        state_ready = (
-            isinstance(predictive_state, dict)
-            and bool(predictive_state.get("ready"))
-            and int(predictive_state.get("analog_count") or 0) >= 25
-        )
-        if not hgb_ready and not state_ready:
-            return None, "beta_v2_models_warming_or_no_state"
-        if hgb_ready and float(opportunity.get("trust") or 0.0) < 0.25:
-            return None, "beta_v2_trust_below_threshold"
+        if not state_ready and not hgb_ready:
+            return None, "beta_v2_models_warming"
+        if not regime_ready and not hgb_ready:
+            # Alpha still records the undefined regime as a NO_TRADE observation.
+            return opportunity, None
         return opportunity, None
+
+    @staticmethod
+    def _atm_iv(options: list[dict[str, Any]], spot: float) -> float | None:
+        rows = [
+            float(row.get("iv") or 0.0)
+            for row in options
+            if float(row.get("iv") or 0.0) > 0.0
+            and abs(float(row.get("strike") or 0.0) - spot) <= 1.5
+        ]
+        if not rows:
+            rows = [float(row.get("iv") or 0.0) for row in options if float(row.get("iv") or 0.0) > 0.0]
+        return float(statistics.median(rows)) if rows else None
 
     def _preview_fee_gate(self, candidate: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
         has_execution_preview = bool(
@@ -123,96 +127,46 @@ class V2EngineService(_BaseV2EngineService):
                 "cost_source": "actual_chain_quote_drag_plus_pass_through_estimate",
             }
 
-        candidate_payload = candidate.get("payload") or {}
-        authority = str(candidate_payload.get("authority") or "")
-        if authority == HGB_AUTHORITY:
-            estimated_fees = float(
-                (candidate_payload.get("execution") or {}).get(
-                    "estimated_roundtrip_fees_dollars"
-                )
-                or 0.0
-            )
-            risk_ex_fees = max(0.0, float(candidate.get("max_loss") or 0.0) - estimated_fees)
-            preview_risk = risk_ex_fees + roundtrip
-            ok = roundtrip <= 3.0 and preview_risk <= 100.0 + 1e-9
-            return ok, {
-                "preview": preview,
-                "preview_roundtrip_fee_estimate": roundtrip,
-                "preview_max_loss_dollars": preview_risk,
-                "cost_source": "tradier_order_preview",
-                "preview_policy": "hgb_execution_cost_and_risk_veto_only",
-            }
-
-        if authority in {STATE_PQ_CHALLENGER_AUTHORITY, STATE_PQ_STATE_ONLY_AUTHORITY}:
-            selection = candidate_payload.get("state_pq_selection") or {}
-            robust_ev = float(selection.get("challenger_robust_ev") or 0.0)
-            preview_risk = float(candidate.get("max_loss") or 0.0) + roundtrip
-            net_robust_after_preview = robust_ev - roundtrip
-            ok = (
-                roundtrip <= 5.0
-                and preview_risk <= 100.0 + 1e-9
-                and net_robust_after_preview > 0.0
-            )
-            return ok, {
-                "preview": preview,
-                "preview_roundtrip_fee_estimate": roundtrip,
-                "preview_max_loss_dollars": preview_risk,
-                "robust_ev_after_preview_fees": net_robust_after_preview,
-                "cost_source": "tradier_order_preview",
-                "preview_policy": "state_pq_stress_edge_cost_and_risk_veto",
-            }
-
-        net_after_preview = float(candidate.get("expected_value") or 0.0) - roundtrip
-        return net_after_preview > 0.0, {
+        payload = candidate.get("payload") or {}
+        thesis = payload.get("trade_thesis") or {}
+        economics = thesis.get("economics") or {}
+        robust_ev = float(economics.get("robust_ev_after_3x_drag_dollars") or 0.0)
+        max_loss = float(candidate.get("max_loss") or 0.0)
+        preview_risk = max_loss + roundtrip
+        robust_after_preview = robust_ev - roundtrip
+        ok = (
+            roundtrip <= 5.0
+            and preview_risk <= min(100.0, float(self.config.risk.maximum_trade_risk_dollars)) + 1e-9
+            and robust_after_preview > 0.0
+        )
+        return ok, {
+            "preview": preview,
             "preview_roundtrip_fee_estimate": roundtrip,
-            "expected_value_after_preview_fees": net_after_preview,
+            "preview_max_loss_dollars": preview_risk,
+            "robust_ev_after_preview_fees": robust_after_preview,
             "cost_source": "tradier_order_preview",
+            "preview_policy": "closed_loop_trader_cost_and_risk_veto",
         }
 
     @staticmethod
-    def _mark_shadow(
+    def _mark_candidates(
         candidates: list[dict[str, Any]],
         *,
-        authorized_id: str | None = None,
-        reason: str = "v2_state_pq_not_authorized",
-    ) -> list[dict[str, Any]]:
+        authorized_id: str | None,
+    ) -> None:
         for candidate in candidates:
+            payload = dict(candidate.get("payload") or {})
             if authorized_id and candidate.get("candidate_id") == authorized_id:
-                payload = dict(candidate.get("payload") or {})
-                payload["shadow_only"] = False
-                payload["execution_authority"] = True
-                candidate["payload"] = payload
                 candidate["status"] = "ELIGIBLE"
                 candidate["rejection_reason"] = None
-                continue
-            candidate["status"] = "SHADOW"
-            candidate["rejection_reason"] = reason
-            payload = dict(candidate.get("payload") or {})
-            payload["shadow_only"] = True
-            payload["execution_authority"] = False
+                payload["shadow_only"] = False
+                payload["execution_authority"] = True
+            else:
+                candidate["status"] = "SHADOW"
+                candidate["rejection_reason"] = "closed_loop_agent_not_current_expression"
+                payload["shadow_only"] = True
+                payload["execution_authority"] = False
             candidate["payload"] = payload
-        return candidates
-
-    @staticmethod
-    def _grant_state_authority(
-        candidate: dict[str, Any],
-        selection: dict[str, Any],
-        *,
-        state_only: bool,
-    ) -> dict[str, Any]:
-        payload = dict(candidate.get("payload") or {})
-        payload["authority"] = (
-            STATE_PQ_STATE_ONLY_AUTHORITY if state_only else STATE_PQ_CHALLENGER_AUTHORITY
-        )
-        payload["execution_authority"] = True
-        payload["shadow_only"] = False
-        payload["forecast_horizon_minutes"] = 15
-        payload["force_horizon_exit"] = True
-        payload["state_pq_selection"] = selection
-        candidate["payload"] = payload
-        candidate["status"] = "ELIGIBLE"
-        candidate["rejection_reason"] = None
-        return candidate
 
     def run_once(self) -> str | None:
         self._process_commands()
@@ -261,51 +215,85 @@ class V2EngineService(_BaseV2EngineService):
         )
         self.journal.insert_prediction(state_prediction)
 
-        primary = build_hgb_vertical_candidate(state_prediction, beta, options)
-        primary_valuation = find_primary_valuation(primary, full_candidates)
-        challenger, selection = authorize_state_pq_challenger(
-            primary,
-            primary_valuation,
-            full_candidates,
+        history = playbook_history(self.journal)
+        plan = build_agent_plan(
             beta,
-            options,
+            full_candidates,
+            now=now,
+            playbook_history=history,
         )
+        chosen = plan.candidate if plan.action == "ENTER" else None
 
-        chosen = primary
-        if challenger is not None:
-            chosen = self._grant_state_authority(
-                challenger,
-                selection,
-                state_only=primary is None,
-            )
-            if primary is not None:
-                self._mark_shadow(
-                    [primary],
-                    reason="state_pq_challenger_authorized",
-                )
-        elif primary is not None:
-            primary.setdefault("payload", {})["state_pq_selection"] = selection
-            primary.setdefault("payload", {})["execution_authority"] = True
+        if plan.thesis is not None:
+            thesis = plan.thesis.as_dict()
+            market_at_entry = {
+                "spot": float(snapshot.get("spy_price") or 0.0),
+                "atm_iv": self._atm_iv(options, float(snapshot.get("spy_price") or 0.0)),
+                "captured_at": str(snapshot.get("captured_at") or ""),
+                "beta_timestamp": beta.get("timestamp"),
+            }
+            thesis["market_at_entry"] = market_at_entry
+            if plan.candidate is not None:
+                candidate_payload = dict(plan.candidate.get("payload") or {})
+                candidate_payload["authority"] = TRADER_AGENT_AUTHORITY
+                candidate_payload["trade_thesis"] = thesis
+                candidate_payload["trader_agent"] = {
+                    "plan_action": plan.action,
+                    "plan_reason": plan.reason,
+                    "diagnostics": plan.diagnostics,
+                    "playbook_history": history.get(plan.playbook, {}),
+                }
+                plan.candidate["payload"] = candidate_payload
+
+        setup_key = plan.thesis.setup_key if plan.thesis is not None else ""
+        already_traded = bool(setup_key and self.journal.get_control("last_v2_agent_setup_key") == setup_key)
+        if already_traded and chosen is not None:
+            chosen = None
+            plan_reason = "setup_episode_already_traded"
+        else:
+            plan_reason = plan.reason
 
         authorized_id = chosen.get("candidate_id") if chosen is not None else None
-        self._mark_shadow(full_candidates, authorized_id=authorized_id)
+        self._mark_candidates(full_candidates, authorized_id=authorized_id)
+        self.journal.insert_candidates(full_candidates)
 
-        journal_candidates: list[dict[str, Any]] = []
-        if primary is not None:
-            journal_candidates.append(primary)
-        journal_candidates.extend(full_candidates)
-        self.journal.insert_candidates(journal_candidates)
+        if plan.action == "WAIT" and plan.thesis is not None:
+            self.journal.set_control("v2_pending_trade_thesis", json.dumps(plan.thesis.as_dict(), separators=(",", ":")))
+        elif plan.action == "NO_TRADE":
+            self.journal.set_control("v2_pending_trade_thesis", "")
 
-        authorized_candidates = [chosen] if chosen is not None else []
-        decision = choose_decision(
-            self.config,
-            self.journal,
-            state_prediction,
-            feature,
-            authorized_candidates,
-            account,
-            now=now,
-        )
+        if chosen is None:
+            decision = no_trade_decision(
+                state_prediction,
+                feature,
+                account,
+                plan_reason,
+                now=now,
+                payload={
+                    "v2": True,
+                    "trader_agent": {
+                        "action": plan.action,
+                        "playbook": plan.playbook,
+                        "diagnostics": plan.diagnostics,
+                        "trade_thesis": plan.thesis.as_dict() if plan.thesis else None,
+                    },
+                },
+            )
+        else:
+            decision = choose_decision(
+                self.config,
+                self.journal,
+                state_prediction,
+                feature,
+                [chosen],
+                account,
+                now=now,
+            )
+            decision.setdefault("payload", {})["trader_agent"] = {
+                "playbook": plan.playbook,
+                "trade_thesis": plan.thesis.as_dict() if plan.thesis else None,
+                "diagnostics": plan.diagnostics,
+            }
 
         if decision["action"] in {"PAPER_ORDER", "SUBMIT_ORDER"} and chosen is not None:
             preview_ok, preview_detail = self._preview_fee_gate(chosen)
@@ -322,17 +310,20 @@ class V2EngineService(_BaseV2EngineService):
             else:
                 try:
                     self.execution.execute(decision, chosen)
+                    if setup_key:
+                        self.journal.set_control("last_v2_agent_setup_key", setup_key)
+                    self.journal.set_control("v2_pending_trade_thesis", "")
                 except Exception as exc:
                     self.journal.alert(
                         "critical",
-                        "V2 state/P-Q execution failed",
+                        "V2 trader-agent execution failed",
                         str(exc),
                         "execution",
                     )
                     with contextlib.suppress(Exception):
                         self.publisher.alert(
                             "critical",
-                            "V2 state/P-Q execution failed",
+                            "V2 trader-agent execution failed",
                             str(exc),
                             "execution",
                         )
@@ -342,7 +333,6 @@ class V2EngineService(_BaseV2EngineService):
         self._publish(snapshot, feature, state_prediction, account)
         return (
             f"prediction={state_prediction['prediction_id']} action={decision['action']} "
-            f"primary={'none' if primary is None else primary['strategy']} "
-            f"chosen={'none' if chosen is None else chosen['strategy']} "
-            f"full={len(full_candidates)} lane={selection.get('lane')}"
+            f"agent={plan.action} playbook={plan.playbook} "
+            f"chosen={'none' if chosen is None else chosen['strategy']} full={len(full_candidates)}"
         )
