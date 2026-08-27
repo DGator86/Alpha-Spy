@@ -12,13 +12,18 @@ import httpx
 from . import hardening as hardening_module
 from .broker_reconcile import BrokerReconciler
 from .hardening import HardenedSettlementService
-from .position_management import PositionManagementDecision, evaluate_position as legacy_evaluate_position
+from .position_management import (
+    PositionManagementDecision,
+    PositionSignal,
+    evaluate_position as legacy_evaluate_position,
+)
 from .tradier import TradierClient
 from .v2_learning import post_trade_review
 from .v2_trade_management import ADJUST, RESTRUCTURE, SCALE, manage_trade
 
 TRADER_AGENT_AUTHORITY = "alpha_v2_closed_loop_trader_agent"
 DEFAULT_BETA_V2_STATE_URL = "http://127.0.0.1:8790/api/state"
+LEGACY_FIXED_HORIZON_AUTHORITY = "beta_v2_hgb_blocked_walk_forward"
 
 
 def _candidate_context(position: dict[str, Any]) -> dict[str, Any]:
@@ -34,6 +39,43 @@ def _trade_thesis(position: dict[str, Any]) -> dict[str, Any] | None:
     if str(context.get("authority") or "") != TRADER_AGENT_AUTHORITY:
         return None
     return thesis if isinstance(thesis, dict) else None
+
+
+def evaluate_v2_position(
+    position: dict[str, Any],
+    *,
+    now: datetime,
+    pnl: float,
+    mfe: float,
+    signal: PositionSignal,
+) -> PositionManagementDecision:
+    """Compatibility shim for historical fixed-horizon V2 positions/tests.
+
+    The authoritative V2SettlementService does not call this for trader-agent
+    positions. It remains only so old paper positions tagged with the original HGB
+    authority and their regression tests retain deterministic T+15 semantics.
+    """
+    context = _candidate_context(position)
+    if str(context.get("authority") or "") != LEGACY_FIXED_HORIZON_AUTHORITY:
+        return legacy_evaluate_position(position, now=now, pnl=pnl, mfe=mfe, signal=signal)
+    opened = datetime.fromisoformat(str(position["opened_at"]).replace("Z", "+00:00"))
+    horizon = max(1, int(context.get("forecast_horizon_minutes") or 15))
+    elapsed = max(0.0, (now - opened).total_seconds() / 60.0)
+    should_exit = elapsed >= horizon
+    return PositionManagementDecision(
+        should_exit=should_exit,
+        reason="forecast_horizon_exit" if should_exit else None,
+        target_pnl=None,
+        stop_pnl=None,
+        trailing_floor=None,
+        thesis_valid=True,
+        state={
+            "authority": LEGACY_FIXED_HORIZON_AUTHORITY,
+            "legacy_compatibility": True,
+            "elapsed_minutes": elapsed,
+            "forecast_horizon_minutes": horizon,
+        },
+    )
 
 
 class V2SettlementService(HardenedSettlementService):
@@ -170,8 +212,6 @@ class V2SettlementService(HardenedSettlementService):
         position["quantity"] = remaining
         position["realized_pnl"] = float(payload["realized_scale_pnl"])
         self.journal.upsert_position(position)
-        # upsert_position intentionally preserves original sizing metadata, so a
-        # partial quantity reduction is written explicitly for the live position.
         with self.journal.transaction() as con:
             con.execute(
                 "UPDATE positions SET quantity=?,realized_pnl=?,payload_json=? WHERE position_id=?",
@@ -209,11 +249,7 @@ class V2SettlementService(HardenedSettlementService):
 
         exit_for_adjustment = management.action in {ADJUST, RESTRUCTURE}
         should_exit = bool(management.should_exit or exit_for_adjustment)
-        reason = (
-            f"agent_{management.action.lower()}:{management.reason}"
-            if should_exit
-            else None
-        )
+        reason = f"agent_{management.action.lower()}:{management.reason}" if should_exit else None
 
         def evaluate_agent_position(position_arg, *, now, pnl, mfe, signal):
             return PositionManagementDecision(
