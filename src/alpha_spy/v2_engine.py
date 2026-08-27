@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import statistics
 from datetime import UTC, datetime
 from typing import Any
@@ -11,15 +12,17 @@ import httpx
 from .execution import build_multileg_payload
 from .features import compute_features
 from .prediction import create_prediction
-from .risk import choose_decision, no_trade_decision
+from .risk import allowed_risk, choose_decision, no_trade_decision
 from .tradier import TradierClient, preview_fees
 from .v2_learning import playbook_history
+from .v2_pending_entry import resolve_pending_entry
 from .v2_services import V2EngineService as _BaseV2EngineService
 from .v2_state_pq import generate_state_pq_candidates
 from .v2_trader_agent import build_agent_plan
 
 DEFAULT_BETA_V2_STATE_URL = "http://127.0.0.1:8790/api/state"
 TRADER_AGENT_AUTHORITY = "alpha_v2_closed_loop_trader_agent"
+MAX_SCALE_UNITS = 5
 
 
 class V2EngineService(_BaseV2EngineService):
@@ -38,8 +41,8 @@ class V2EngineService(_BaseV2EngineService):
             beta_state_url=beta_state_url or DEFAULT_BETA_V2_STATE_URL,
             **kwargs,
         )
-        # Multiple independent setups may be traded sequentially. This is a hard
-        # operational guardrail, not a strategy rule; only one managed position may
+        # Multiple independent setups may be traded sequentially. This is an
+        # operational ceiling, not a signal quota; only one managed position may
         # still be open at a time through the normal risk gates.
         self.config.risk.maximum_trades_per_day = max(8, int(self.config.risk.maximum_trades_per_day))
 
@@ -78,7 +81,7 @@ class V2EngineService(_BaseV2EngineService):
         if not state_ready and not hgb_ready:
             return None, "beta_v2_models_warming"
         if not regime_ready and not hgb_ready:
-            # Alpha still records the undefined regime as a NO_TRADE observation.
+            # Alpha records undefined states as explicit NO_TRADE observations.
             return opportunity, None
         return opportunity, None
 
@@ -168,6 +171,23 @@ class V2EngineService(_BaseV2EngineService):
                 payload["execution_authority"] = False
             candidate["payload"] = payload
 
+    def _pending_state(self, beta: dict[str, Any], now: datetime) -> tuple[str, str, dict[str, Any] | None]:
+        raw = self.journal.get_control("v2_pending_trade_thesis")
+        if not raw:
+            return "NONE", "no_pending_thesis", None
+        try:
+            thesis = json.loads(raw)
+        except json.JSONDecodeError:
+            self.journal.set_control("v2_pending_trade_thesis", "")
+            return "CANCEL", "pending_thesis_corrupt", None
+        if not isinstance(thesis, dict):
+            self.journal.set_control("v2_pending_trade_thesis", "")
+            return "CANCEL", "pending_thesis_invalid", None
+        resolution = resolve_pending_entry(thesis, beta, now=now)
+        if resolution.action in {"RELEASE", "CANCEL"}:
+            self.journal.set_control("v2_pending_trade_thesis", "")
+        return resolution.action, resolution.reason, thesis
+
     def run_once(self) -> str | None:
         self._process_commands()
         snapshot = self.journal.latest_snapshot()
@@ -215,51 +235,85 @@ class V2EngineService(_BaseV2EngineService):
         )
         self.journal.insert_prediction(state_prediction)
 
+        pending_action, pending_reason, pending_thesis = self._pending_state(beta, now)
         history = playbook_history(self.journal)
-        plan = build_agent_plan(
-            beta,
-            full_candidates,
-            now=now,
-            playbook_history=history,
-        )
-        chosen = plan.candidate if plan.action == "ENTER" else None
-
-        if plan.thesis is not None:
-            thesis = plan.thesis.as_dict()
-            market_at_entry = {
-                "spot": float(snapshot.get("spy_price") or 0.0),
-                "atm_iv": self._atm_iv(options, float(snapshot.get("spy_price") or 0.0)),
-                "captured_at": str(snapshot.get("captured_at") or ""),
-                "beta_timestamp": beta.get("timestamp"),
+        if pending_action == "WAIT":
+            plan = None
+            plan_action = "WAIT"
+            plan_reason = pending_reason
+            plan_playbook = str((pending_thesis or {}).get("playbook") or "PENDING_SETUP")
+            plan_diagnostics = {
+                "pending": True,
+                "pending_reason": pending_reason,
+                "pending_thesis_id": (pending_thesis or {}).get("thesis_id"),
             }
-            thesis["market_at_entry"] = market_at_entry
-            if plan.candidate is not None:
-                candidate_payload = dict(plan.candidate.get("payload") or {})
-                candidate_payload["authority"] = TRADER_AGENT_AUTHORITY
-                candidate_payload["trade_thesis"] = thesis
-                candidate_payload["trader_agent"] = {
-                    "plan_action": plan.action,
-                    "plan_reason": plan.reason,
-                    "diagnostics": plan.diagnostics,
-                    "playbook_history": history.get(plan.playbook, {}),
-                }
-                plan.candidate["payload"] = candidate_payload
+            thesis_dict = pending_thesis
+            chosen = None
+            setup_key = str((pending_thesis or {}).get("setup_key") or "")
+        else:
+            plan = build_agent_plan(
+                beta,
+                full_candidates,
+                now=now,
+                playbook_history=history,
+            )
+            plan_action = plan.action
+            plan_reason = plan.reason
+            plan_playbook = plan.playbook
+            plan_diagnostics = plan.diagnostics
+            chosen = plan.candidate if plan.action == "ENTER" else None
+            setup_key = plan.thesis.setup_key if plan.thesis is not None else ""
+            thesis_dict = plan.thesis.as_dict() if plan.thesis is not None else None
 
-        setup_key = plan.thesis.setup_key if plan.thesis is not None else ""
+            if thesis_dict is not None:
+                setup_market = {
+                    "spot": float(snapshot.get("spy_price") or 0.0),
+                    "atm_iv": self._atm_iv(options, float(snapshot.get("spy_price") or 0.0)),
+                    "captured_at": str(snapshot.get("captured_at") or ""),
+                    "beta_timestamp": beta.get("timestamp"),
+                }
+                thesis_dict["market_at_setup"] = setup_market
+                if plan.candidate is not None:
+                    per_unit_risk = max(float(plan.candidate.get("max_loss") or 0.0), 1e-9)
+                    risk_budget = allowed_risk(
+                        self.config,
+                        account,
+                        float(feature.get("trust_score") or 0.0),
+                        str(feature.get("health_state") or "RED"),
+                    )
+                    quantity_capacity = max(1, int(math.floor(risk_budget / per_unit_risk)))
+                    thesis_dict["risk_budget_dollars"] = risk_budget
+                    thesis_dict["per_unit_max_loss_dollars"] = per_unit_risk
+                    thesis_dict["maximum_quantity"] = min(MAX_SCALE_UNITS, quantity_capacity)
+                    if chosen is not None:
+                        thesis_dict["market_at_entry"] = setup_market
+
+                    candidate_payload = dict(plan.candidate.get("payload") or {})
+                    candidate_payload["authority"] = TRADER_AGENT_AUTHORITY
+                    candidate_payload["trade_thesis"] = thesis_dict
+                    candidate_payload["trader_agent"] = {
+                        "plan_action": plan.action,
+                        "plan_reason": plan.reason,
+                        "diagnostics": plan.diagnostics,
+                        "playbook_history": history.get(plan.playbook, {}),
+                    }
+                    plan.candidate["payload"] = candidate_payload
+
         already_traded = bool(setup_key and self.journal.get_control("last_v2_agent_setup_key") == setup_key)
         if already_traded and chosen is not None:
             chosen = None
             plan_reason = "setup_episode_already_traded"
-        else:
-            plan_reason = plan.reason
 
         authorized_id = chosen.get("candidate_id") if chosen is not None else None
         self._mark_candidates(full_candidates, authorized_id=authorized_id)
         self.journal.insert_candidates(full_candidates)
 
-        if plan.action == "WAIT" and plan.thesis is not None:
-            self.journal.set_control("v2_pending_trade_thesis", json.dumps(plan.thesis.as_dict(), separators=(",", ":")))
-        elif plan.action == "NO_TRADE":
+        if plan_action == "WAIT" and thesis_dict is not None and pending_action != "WAIT":
+            self.journal.set_control(
+                "v2_pending_trade_thesis",
+                json.dumps(thesis_dict, separators=(",", ":")),
+            )
+        elif plan_action == "NO_TRADE":
             self.journal.set_control("v2_pending_trade_thesis", "")
 
         if chosen is None:
@@ -272,10 +326,11 @@ class V2EngineService(_BaseV2EngineService):
                 payload={
                     "v2": True,
                     "trader_agent": {
-                        "action": plan.action,
-                        "playbook": plan.playbook,
-                        "diagnostics": plan.diagnostics,
-                        "trade_thesis": plan.thesis.as_dict() if plan.thesis else None,
+                        "action": plan_action,
+                        "playbook": plan_playbook,
+                        "diagnostics": plan_diagnostics,
+                        "trade_thesis": thesis_dict,
+                        "pending_resolution": pending_action,
                     },
                 },
             )
@@ -290,9 +345,10 @@ class V2EngineService(_BaseV2EngineService):
                 now=now,
             )
             decision.setdefault("payload", {})["trader_agent"] = {
-                "playbook": plan.playbook,
-                "trade_thesis": plan.thesis.as_dict() if plan.thesis else None,
-                "diagnostics": plan.diagnostics,
+                "playbook": plan_playbook,
+                "trade_thesis": thesis_dict,
+                "diagnostics": plan_diagnostics,
+                "pending_resolution": pending_action,
             }
 
         if decision["action"] in {"PAPER_ORDER", "SUBMIT_ORDER"} and chosen is not None:
@@ -309,6 +365,8 @@ class V2EngineService(_BaseV2EngineService):
                 )
             else:
                 try:
+                    # Entry starts at one unit. Additional risk must be earned by
+                    # strengthening evidence in the settlement manager.
                     self.execution.execute(decision, chosen)
                     if setup_key:
                         self.journal.set_control("last_v2_agent_setup_key", setup_key)
@@ -333,6 +391,6 @@ class V2EngineService(_BaseV2EngineService):
         self._publish(snapshot, feature, state_prediction, account)
         return (
             f"prediction={state_prediction['prediction_id']} action={decision['action']} "
-            f"agent={plan.action} playbook={plan.playbook} "
+            f"agent={plan_action} playbook={plan_playbook} "
             f"chosen={'none' if chosen is None else chosen['strategy']} full={len(full_candidates)}"
         )
