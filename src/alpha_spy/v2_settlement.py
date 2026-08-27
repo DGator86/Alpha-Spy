@@ -11,15 +11,16 @@ import httpx
 
 from . import hardening as hardening_module
 from .broker_reconcile import BrokerReconciler
+from .execution import ExecutionManager, build_multileg_payload
 from .hardening import HardenedSettlementService
 from .position_management import (
     PositionManagementDecision,
     PositionSignal,
     evaluate_position as legacy_evaluate_position,
 )
-from .tradier import TradierClient
+from .tradier import TradierClient, preview_fees
 from .v2_learning import post_trade_review
-from .v2_trade_management import ADJUST, RESTRUCTURE, SCALE, manage_trade
+from .v2_trade_management import ADD, ADJUST, RESTRUCTURE, SCALE, manage_trade
 
 TRADER_AGENT_AUTHORITY = "alpha_v2_closed_loop_trader_agent"
 DEFAULT_BETA_V2_STATE_URL = "http://127.0.0.1:8790/api/state"
@@ -49,12 +50,7 @@ def evaluate_v2_position(
     mfe: float,
     signal: PositionSignal,
 ) -> PositionManagementDecision:
-    """Compatibility shim for historical fixed-horizon V2 positions/tests.
-
-    The authoritative V2SettlementService does not call this for trader-agent
-    positions. It remains only so old paper positions tagged with the original HGB
-    authority and their regression tests retain deterministic T+15 semantics.
-    """
+    """Compatibility shim for historical fixed-horizon V2 positions/tests."""
     context = _candidate_context(position)
     if str(context.get("authority") or "") != LEGACY_FIXED_HORIZON_AUTHORITY:
         return legacy_evaluate_position(position, now=now, pnl=pnl, mfe=mfe, signal=signal)
@@ -125,6 +121,18 @@ class V2SettlementService(HardenedSettlementService):
                 net -= midpoint * quantity
         return abs(net)
 
+    @staticmethod
+    def _entry_value(candidate: dict[str, Any], quotes: dict[str, dict[str, Any]]) -> float:
+        net_cash = 0.0
+        for leg in candidate.get("legs", []):
+            quote = quotes[str(leg["symbol"])]
+            quantity = int(leg.get("quantity", 1))
+            if str(leg["side"]).startswith("buy"):
+                net_cash -= float(quote.get("ask") or 0.0) * quantity
+            else:
+                net_cash += float(quote.get("bid") or 0.0) * quantity
+        return abs(net_cash)
+
     def _pnl_at_value(self, position: dict[str, Any], value: float) -> float:
         entry_kind = position.get("payload", {}).get("entry_kind", "debit")
         quantity = int(position["quantity"])
@@ -163,6 +171,7 @@ class V2SettlementService(HardenedSettlementService):
         market_at_entry = thesis.get("market_at_entry") or {}
         entry_iv = market_at_entry.get("atm_iv") if isinstance(market_at_entry, dict) else None
         current_iv = self._current_iv(position, quotes)
+        payload = position.get("payload") or {}
         management = manage_trade(
             thesis,
             elapsed_minutes=elapsed,
@@ -173,9 +182,90 @@ class V2SettlementService(HardenedSettlementService):
             beta=self._beta_opportunity(),
             current_iv=current_iv,
             entry_iv=float(entry_iv) if entry_iv not in (None, "") else None,
-            already_scaled=bool((position.get("payload") or {}).get("agent_scaled_once")),
+            already_scaled=bool(payload.get("agent_scaled_once")),
+            already_added=bool(payload.get("agent_added_once")),
+            max_quantity=int(thesis.get("maximum_quantity") or 1),
         )
         return management, liquidation_value
+
+    def _add_position(self, position: dict[str, Any], management) -> str:
+        thesis = _trade_thesis(position) or {}
+        candidate = (position.get("payload") or {}).get("candidate") or {}
+        current_qty = int(position.get("quantity") or 1)
+        maximum_qty = max(1, int(thesis.get("maximum_quantity") or 1))
+        add_qty = min(max(1, int(management.scale_quantity or 1)), maximum_qty - current_qty)
+        if add_qty <= 0:
+            return "add_unavailable_at_max_quantity"
+
+        per_unit_risk = float(thesis.get("per_unit_max_loss_dollars") or candidate.get("max_loss") or 0.0)
+        risk_budget = float(thesis.get("risk_budget_dollars") or 0.0)
+        if per_unit_risk <= 0.0 or risk_budget <= 0.0 or (current_qty + add_qty) * per_unit_risk > risk_budget + 1e-9:
+            return "add_blocked_by_risk_budget"
+
+        quotes, missing = self._held_leg_quotes(position)
+        if missing:
+            return f"add_missing_quotes:{','.join(missing)}"
+        add_price = self._entry_value(candidate, quotes)
+        if add_price <= 0.0:
+            return "add_invalid_current_entry_price"
+
+        fees = 0.0
+        filled_qty = add_qty
+        fill_price = add_price
+        broker_id = None
+        if BrokerReconciler(self.config, self.journal).broker_mode:
+            self.config.assert_broker_submission_safe()
+            payload = build_multileg_payload(candidate, add_qty, add_price)
+            with TradierClient(self.config) as client:
+                broker_id, _, preview = self._place_exit(client, payload)
+                state = self._wait_for_fill(
+                    client,
+                    broker_id,
+                    self.config.trading.exit_fill_wait_seconds,
+                )
+            status = ExecutionManager._status(state)
+            executed, _ = hardening_module.order_quantities(state)
+            if status == "FILLED" and executed <= 0:
+                executed = float(add_qty)
+            filled_qty = max(0, round(executed))
+            if filled_qty <= 0:
+                return f"add_not_filled:{status}"
+            fill_price = ExecutionManager._average_fill(state) or add_price
+            fee_estimate = preview_fees(preview)
+            fees = float(fee_estimate or 0.0)
+        else:
+            leg_contracts = sum(max(1, int(leg.get("quantity", 1))) for leg in candidate.get("legs", []))
+            fees = leg_contracts * float(self.config.trading.fee_per_contract) * filled_qty
+
+        new_qty = current_qty + filled_qty
+        old_entry = float(position["entry_value"])
+        weighted_entry = (old_entry * current_qty + float(fill_price) * filled_qty) / new_qty
+        payload = position.setdefault("payload", {})
+        payload["agent_added_once"] = True
+        payload["added_quantity"] = int(payload.get("added_quantity") or 0) + filled_qty
+        payload["add_fees"] = float(payload.get("add_fees") or 0.0) + fees
+        payload["entry_fees"] = float(payload.get("entry_fees") or 0.0) + fees
+        payload["last_add_broker_order_id"] = str(broker_id) if broker_id is not None else None
+        payload["management_state"] = management.state
+        total_max_loss = float(candidate.get("max_loss") or per_unit_risk) * new_qty
+        total_max_profit = float(candidate.get("max_profit") or position.get("max_profit") or 0.0) * new_qty
+        with self.journal.transaction() as con:
+            con.execute(
+                """
+                UPDATE positions
+                SET quantity=?,entry_value=?,max_loss=?,max_profit=?,payload_json=?
+                WHERE position_id=? AND status='OPEN'
+                """,
+                (
+                    new_qty,
+                    weighted_entry,
+                    total_max_loss,
+                    total_max_profit,
+                    self.journal._json(payload),
+                    position["position_id"],
+                ),
+            )
+        return f"added={filled_qty} quantity={new_qty} price={float(fill_price):.2f}"
 
     def _scale_position(self, position: dict[str, Any], management, liquidation_value: float) -> str:
         quantity = int(position.get("quantity") or 1)
@@ -244,6 +334,8 @@ class V2SettlementService(HardenedSettlementService):
         management, liquidation_value = precheck
         position_id = str(position["position_id"])
 
+        if management.action == ADD:
+            return self._add_position(position, management)
         if management.action == SCALE and int(position.get("quantity") or 1) >= 2:
             return self._scale_position(position, management, liquidation_value)
 
