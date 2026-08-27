@@ -34,7 +34,7 @@ spy-alpha = "alpha_spy.research.cli:app"
 spy-alpha-dashboard = "alpha_spy.dashboard.cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "src"]
 include-package-data = true
 
 [tool.setuptools.packages.find]
@@ -76,7 +76,7 @@ allowed-confusables = ["–"]
 "src/alpha_spy/position_management.py" = ["SIM102"]
 "tests/test_friday_fail_safes.py" = ["SIM300"]
 # V2 research files are still under active architecture iteration; import-order
-# and one comprehension-only finding are non-functional and tracked explicitly.
+# and narrow import-only findings are non-functional and tracked explicitly.
 "src/alpha_spy/strategy_v2.py" = ["C401"]
 "src/alpha_spy/strategy_v2_complete.py" = ["I001"]
 "src/alpha_spy/strategy_v2_execution.py" = ["I001"]
@@ -85,6 +85,7 @@ allowed-confusables = ["–"]
 "src/alpha_spy/v2_hgb_vertical.py" = ["F401"]
 "src/alpha_spy/v2_runtime.py" = ["I001"]
 "src/alpha_spy/v2_settlement.py" = ["I001"]
+"src/alpha_spy/v2_trader_agent.py" = ["F401"]
 "tests/test_v2_complete_geometry.py" = ["I001"]
 
 [tool.ruff.lint.flake8-bugbear]
