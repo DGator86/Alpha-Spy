@@ -18,7 +18,7 @@ from .position_management import (
     PositionSignal,
     evaluate_position as legacy_evaluate_position,
 )
-from .tradier import TradierClient, preview_fees
+from .tradier import TradierClient, order_quantities, preview_fees
 from .v2_learning import post_trade_review
 from .v2_trade_management import ADD, ADJUST, RESTRUCTURE, SCALE, manage_trade
 
@@ -257,7 +257,7 @@ class V2SettlementService(HardenedSettlementService):
                 broker_id, _, preview = self._place_exit(client, payload)
                 state = self._wait_for_fill(client, broker_id, self.config.trading.exit_fill_wait_seconds)
             status = ExecutionManager._status(state)
-            executed, _ = hardening_module.order_quantities(state)
+            executed, _ = order_quantities(state)
             if status == "FILLED" and executed <= 0:
                 executed = float(add_qty)
             filled_qty = max(0, round(executed))
