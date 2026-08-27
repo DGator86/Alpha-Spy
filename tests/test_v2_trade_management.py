@@ -1,4 +1,5 @@
 from alpha_spy.v2_trade_management import (
+    ADD,
     BAIL,
     HOLD,
     SCALE,
@@ -13,12 +14,16 @@ def _thesis(playbook: str = "DIRECTIONAL_MOMENTUM"):
         "playbook": playbook,
         "direction": "BULLISH",
         "regime": "DIRECTIONAL_UP" if playbook == "DIRECTIONAL_MOMENTUM" else "QUIET",
+        "regime_confidence": 0.70,
+        "persistence_15": 0.55,
+        "persistence_30": 0.50,
         "most_likely_successor": "DIRECTIONAL_UP" if playbook == "DIRECTIONAL_MOMENTUM" else "QUIET",
         "first_profit_target_dollars": 6.0,
         "second_profit_target_dollars": 18.0,
         "stop_loss_dollars": 12.0,
         "expected_time_to_profit_minutes": 15.0 if playbook == "DIRECTIONAL_MOMENTUM" else 30.0,
         "time_stop_minutes": 22.0 if playbook == "DIRECTIONAL_MOMENTUM" else 40.0,
+        "maximum_quantity": 1,
     }
 
 
@@ -29,6 +34,7 @@ def _beta(regime: str = "DIRECTIONAL_UP"):
             "current_regime": regime,
             "confidence": 0.80,
             "persistence_15": 0.70,
+            "persistence_30": 0.62,
             "most_likely_successor": regime,
             "successor_probabilities": {
                 "DIRECTIONAL_UP": 0.65,
@@ -74,6 +80,37 @@ def test_first_target_scales_multi_unit_position():
     assert result.action == SCALE
     assert result.scale_quantity == 1
     assert result.should_exit is False
+
+
+def test_strengthening_evidence_can_add_but_never_average_down():
+    thesis = _thesis()
+    thesis["maximum_quantity"] = 2
+    add = manage_trade(
+        thesis,
+        elapsed_minutes=4,
+        fair_pnl=2,
+        liquidation_pnl=0,
+        mfe=2,
+        quantity=1,
+        beta=_beta(),
+        current_iv=0.20,
+        entry_iv=0.20,
+    )
+    assert add.action == ADD
+    assert add.scale_quantity == 1
+
+    losing = manage_trade(
+        thesis,
+        elapsed_minutes=4,
+        fair_pnl=-1,
+        liquidation_pnl=-3,
+        mfe=1,
+        quantity=1,
+        beta=_beta(),
+        current_iv=0.20,
+        entry_iv=0.20,
+    )
+    assert losing.action != ADD
 
 
 def test_directional_flip_bails_immediately():
@@ -131,6 +168,10 @@ def test_expected_time_failure_exits_instead_of_hoping():
 
 
 def test_valid_trade_holds_when_on_schedule():
+    beta = _beta()
+    beta["regime_forecast"]["confidence"] = 0.72
+    beta["regime_forecast"]["persistence_15"] = 0.58
+    beta["regime_forecast"]["persistence_30"] = 0.52
     result = manage_trade(
         _thesis(),
         elapsed_minutes=7,
@@ -138,7 +179,7 @@ def test_valid_trade_holds_when_on_schedule():
         liquidation_pnl=1,
         mfe=4,
         quantity=1,
-        beta=_beta(),
+        beta=beta,
         current_iv=0.20,
         entry_iv=0.20,
     )
