@@ -50,7 +50,7 @@ def hierarchy_from_payload(payload: dict[str, Any]) -> RegimeHierarchy | None:
     intraday = _state(raw.get("intraday"))
     swing = _state(raw.get("swing"))
     structural = _state(raw.get("structural"))
-    if None in {micro, intraday, swing, structural}:
+    if any(item is None for item in (micro, intraday, swing, structural)):
         return None
     try:
         return RegimeHierarchy(
@@ -85,9 +85,11 @@ def backfill_lifecycle_from_frozen_predictions(journal, *, limit: int = 25000) -
             (int(limit),),
         ).fetchall()
 
+    existing = {str(row["snapshot_id"]) for row in engine._rows(limit=1_000_000)}
     seen: set[str] = set()
     inserted = 0
     skipped_duplicate = 0
+    already_present = 0
     missing_hierarchy = 0
     invalid_payload = 0
     for row in rows:
@@ -96,6 +98,9 @@ def backfill_lifecycle_from_frozen_predictions(journal, *, limit: int = 25000) -
             skipped_duplicate += 1
             continue
         seen.add(snapshot_id)
+        if snapshot_id in existing:
+            already_present += 1
+            continue
         try:
             payload = json.loads(row["payload_json"] or "{}")
         except (TypeError, json.JSONDecodeError):
@@ -108,15 +113,14 @@ def backfill_lifecycle_from_frozen_predictions(journal, *, limit: int = 25000) -
         if hierarchy is None:
             missing_hierarchy += 1
             continue
-        before = len(engine._rows(limit=1_000_000))
         engine.record_observation(
             snapshot_id=snapshot_id,
             captured_at=str(row["created_at"]),
             hierarchy=hierarchy,
             beta=None,
         )
-        after = len(engine._rows(limit=1_000_000))
-        inserted += int(after > before)
+        existing.add(snapshot_id)
+        inserted += 1
 
     observations = engine._rows(limit=1_000_000)
     episodes = engine._episodes(observations)
@@ -129,6 +133,7 @@ def backfill_lifecycle_from_frozen_predictions(journal, *, limit: int = 25000) -
         "predictions_scanned": len(rows),
         "unique_snapshots_seen": len(seen),
         "observations_inserted": inserted,
+        "already_present": already_present,
         "duplicate_horizons_skipped": skipped_duplicate,
         "missing_hierarchy": missing_hierarchy,
         "invalid_payload": invalid_payload,
