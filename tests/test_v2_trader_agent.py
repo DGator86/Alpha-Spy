@@ -52,7 +52,7 @@ def test_undefined_regime_never_trades():
     beta["regime_forecast"]["definable"] = False
     plan = build_agent_plan(beta, [_candidate("BULL_CALL_DEBIT_SPREAD")], now=datetime(2026, 8, 27, 15, 0, tzinfo=UTC))
     assert plan.action == "NO_TRADE"
-    assert plan.reason == "regime_not_definable"
+    assert plan.reason == "regime_or_lifecycle_not_definable"
 
 
 def test_directional_thesis_records_full_chain():
