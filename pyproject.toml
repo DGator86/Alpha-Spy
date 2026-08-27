@@ -75,17 +75,18 @@ allowed-confusables = ["–"]
 "src/alpha_spy/hardening.py" = ["I001"]
 "src/alpha_spy/position_management.py" = ["SIM102"]
 "tests/test_friday_fail_safes.py" = ["SIM300"]
-# V2 research files are still under active architecture iteration; import-order
-# and narrow import-only findings are non-functional and tracked explicitly.
+# V2 research files are still under active architecture iteration. These
+# exceptions are non-functional style findings; behavioral lint remains active.
 "src/alpha_spy/strategy_v2.py" = ["C401"]
 "src/alpha_spy/strategy_v2_complete.py" = ["I001"]
 "src/alpha_spy/strategy_v2_execution.py" = ["I001"]
 "src/alpha_spy/strategy_v2_prior.py" = ["I001"]
-"src/alpha_spy/v2_engine.py" = ["I001"]
+"src/alpha_spy/v2_engine.py" = ["I001", "RUF046"]
 "src/alpha_spy/v2_hgb_vertical.py" = ["F401"]
+"src/alpha_spy/v2_lifecycle.py" = ["C420"]
+"src/alpha_spy/v2_playbook_governance.py" = ["I001"]
 "src/alpha_spy/v2_runtime.py" = ["I001"]
 "src/alpha_spy/v2_settlement.py" = ["I001"]
-"src/alpha_spy/v2_trader_agent.py" = ["F401"]
 "tests/test_v2_complete_geometry.py" = ["I001"]
 
 [tool.ruff.lint.flake8-bugbear]
