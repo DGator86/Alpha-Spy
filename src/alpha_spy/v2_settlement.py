@@ -79,11 +79,22 @@ class V2SettlementService(HardenedSettlementService):
 
     def __init__(self, config, journal, *, beta_state_url: str | None = None, **kwargs: Any):
         super().__init__(config, journal, **kwargs)
-        self.beta_state_url = (
-            beta_state_url
-            or os.getenv("BETA_SPY_STATE_URL")
-            or DEFAULT_BETA_V2_STATE_URL
-        )
+        self.beta_state_url = beta_state_url or os.getenv("BETA_SPY_STATE_URL") or DEFAULT_BETA_V2_STATE_URL
+
+    @staticmethod
+    def _undefined_alpha_lifecycle() -> dict[str, Any]:
+        return {
+            "definable": False,
+            "current_regime": "UNDEFINED",
+            "confidence": 0.0,
+            "persistence_15": 0.0,
+            "persistence_30": 0.0,
+            "expected_duration_minutes": 0.0,
+            "successor_probabilities": {},
+            "most_likely_successor": "UNDEFINED",
+            "successor_confidence": 0.0,
+            "source": "alpha_lifecycle_state_missing_or_stale",
+        }
 
     def _beta_opportunity(self) -> dict[str, Any] | None:
         try:
@@ -91,20 +102,46 @@ class V2SettlementService(HardenedSettlementService):
             response.raise_for_status()
             state = response.json()
         except (httpx.HTTPError, ValueError):
-            return None
-        if not isinstance(state, dict):
-            return None
-        opportunity = state.get("v2_opportunity") or state.get("opportunity")
+            state = {}
+        opportunity = state.get("v2_opportunity") or state.get("opportunity") if isinstance(state, dict) else None
         if not isinstance(opportunity, dict):
-            return None
+            opportunity = {}
+        else:
+            try:
+                stamp = datetime.fromisoformat(str(opportunity.get("timestamp") or "").replace("Z", "+00:00"))
+                if stamp.tzinfo is None:
+                    stamp = stamp.replace(tzinfo=UTC)
+                age = (datetime.now(UTC) - stamp.astimezone(UTC)).total_seconds()
+                if age < -5.0 or age > 180.0:
+                    opportunity = {}
+            except ValueError:
+                opportunity = {}
+
+        merged = dict(opportunity)
+        merged["beta_regime_forecast"] = opportunity.get("regime_forecast")
+        merged["regime_forecast"] = self._undefined_alpha_lifecycle()
+        merged["regime_authority"] = "alpha_hierarchical_regime"
+        merged["lifecycle_authority"] = "alpha_empirical_regime_lifecycle"
+
+        raw = self.journal.get_control("v2_current_agent_market_state")
+        if not raw:
+            return merged
         try:
-            stamp = datetime.fromisoformat(str(opportunity.get("timestamp") or "").replace("Z", "+00:00"))
+            alpha_state = json.loads(raw)
+            stamp = datetime.fromisoformat(str(alpha_state.get("timestamp") or "").replace("Z", "+00:00"))
             if stamp.tzinfo is None:
                 stamp = stamp.replace(tzinfo=UTC)
             age = (datetime.now(UTC) - stamp.astimezone(UTC)).total_seconds()
-        except ValueError:
-            return None
-        return opportunity if -5.0 <= age <= 180.0 else None
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return merged
+        if age < -5.0 or age > 180.0:
+            return merged
+        regime = alpha_state.get("regime_forecast")
+        if isinstance(regime, dict):
+            merged["regime_forecast"] = regime
+        merged["alpha_regime"] = alpha_state.get("alpha_regime")
+        merged["lifecycle"] = alpha_state.get("lifecycle")
+        return merged
 
     @staticmethod
     def _fair_value(position: dict[str, Any], quotes: dict[str, dict[str, Any]]) -> float:
@@ -218,11 +255,7 @@ class V2SettlementService(HardenedSettlementService):
             payload = build_multileg_payload(candidate, add_qty, add_price)
             with TradierClient(self.config) as client:
                 broker_id, _, preview = self._place_exit(client, payload)
-                state = self._wait_for_fill(
-                    client,
-                    broker_id,
-                    self.config.trading.exit_fill_wait_seconds,
-                )
+                state = self._wait_for_fill(client, broker_id, self.config.trading.exit_fill_wait_seconds)
             status = ExecutionManager._status(state)
             executed, _ = hardening_module.order_quantities(state)
             if status == "FILLED" and executed <= 0:
@@ -279,12 +312,7 @@ class V2SettlementService(HardenedSettlementService):
             partial = deepcopy(position)
             partial["quantity"] = scale_qty
             with TradierClient(self.config) as client:
-                fill = self._close_as_structure(
-                    client,
-                    partial,
-                    current_value=liquidation_value,
-                    force_market=False,
-                )
+                fill = self._close_as_structure(client, partial, current_value=liquidation_value, force_market=False)
             per_unit_entry = float(position["entry_value"])
             if payload.get("entry_kind", "debit") == "debit":
                 realized = (fill.exit_value - per_unit_entry) * 100.0 * scale_qty - fill.fees
@@ -319,7 +347,7 @@ class V2SettlementService(HardenedSettlementService):
         position["payload"] = json.loads(position.pop("payload_json") or "{}")
         if position.get("status") != "CLOSED":
             return
-        review = post_trade_review(position, exit_reason=exit_reason)
+        review = post_trade_review(position, exit_reason=exit_reason, journal=self.journal)
         position.setdefault("payload", {})["post_trade_review"] = review
         self.journal.upsert_position(position)
 
@@ -358,6 +386,8 @@ class V2SettlementService(HardenedSettlementService):
                     "agent_reason": management.reason,
                     "fair_mark_management": True,
                     "liquidation_mark_reserved_for_execution": True,
+                    "regime_authority": "alpha_hierarchical_regime",
+                    "lifecycle_authority": "alpha_empirical_regime_lifecycle",
                 },
             )
 
