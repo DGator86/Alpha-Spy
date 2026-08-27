@@ -6,8 +6,8 @@ from pathlib import Path
 
 from .config import load_config
 from .db import Journal
-from .v2_engine import V2EngineService
 from .v2_lifecycle_backfill import backfill_lifecycle_from_frozen_predictions
+from .v2_runtime_repaired import V2EngineService
 from .v2_settlement_agent import V2SettlementService
 from .v2_streaming_market import V2StreamingMarketService
 
