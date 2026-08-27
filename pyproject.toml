@@ -34,7 +34,7 @@ spy-alpha = "alpha_spy.research.cli:app"
 spy-alpha-dashboard = "alpha_spy.dashboard.cli:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"]
+package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.packages.find]
