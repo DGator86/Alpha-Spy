@@ -11,6 +11,16 @@ from .timeutil import et_now, utc_iso
 from .tradier import TradierClient, preview_fees
 
 
+def _raw_quote_value(row: dict[str, Any], direct_key: str, raw_key: str) -> Any:
+    direct = row.get(direct_key)
+    if direct not in (None, ""):
+        return direct
+    payload = row.get("payload") or {}
+    if isinstance(payload, dict):
+        return payload.get(raw_key)
+    return None
+
+
 def record_chain_tape(
     config: SuiteConfig,
     chain: dict[str, Any] | None,
@@ -29,8 +39,8 @@ def record_chain_tape(
             "bid": row.get("bid"),
             "ask": row.get("ask"),
             "midpoint": row.get("midpoint"),
-            "bid_size": row.get("bid_size"),
-            "ask_size": row.get("ask_size"),
+            "bid_size": _raw_quote_value(row, "bid_size", "bidsize"),
+            "ask_size": _raw_quote_value(row, "ask_size", "asksize"),
             "volume": row.get("volume"),
             "open_interest": row.get("open_interest"),
             "iv": row.get("iv"),
@@ -67,11 +77,7 @@ def apply_preview_fees(
     *,
     finalist_count: int = 8,
 ) -> None:
-    """Replace assumed commissions with broker-preview fees on top finalists.
-
-    The broad tournament uses quoted bid/ask friction. When Tradier execution
-    credentials are configured, the broker's own preview is the final fee truth.
-    """
+    """Replace assumed commissions with broker-preview fees on top finalists."""
     eligible = [candidate for candidate in candidates if candidate.get("status") == "ELIGIBLE"][
         :finalist_count
     ]
@@ -97,8 +103,6 @@ def apply_preview_fees(
                 if fee is None:
                     details["broker_preview_fee_status"] = "missing"
                     continue
-                # Preview describes opening cost. Reserve the same pass-through
-                # fees again for closing; realized broker fills stay authoritative.
                 roundtrip = 2.0 * float(fee)
                 candidate["expected_value"] = float(candidate.get("expected_value") or 0.0) - roundtrip
                 details["doubled_cost_expected_value"] = (
