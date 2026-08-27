@@ -6,8 +6,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-import numpy as np
-
 from .timeutil import ET
 from .v2_state_pq import LONG_VOL_FAMILIES, RANGE_FAMILIES
 
@@ -101,28 +99,26 @@ def _number(value: Any, default: float = 0.0) -> float:
     return parsed if math.isfinite(parsed) else default
 
 
-def _regime(beta: dict[str, Any]) -> dict[str, Any]:
-    raw = beta.get("regime_forecast") or {}
+def _regime(market: dict[str, Any]) -> dict[str, Any]:
+    raw = market.get("regime_forecast") or {}
     if isinstance(raw, dict) and raw:
         return raw
-    state = beta.get("predictive_state") or {}
+    state = market.get("predictive_state") or {}
     ready = isinstance(state, dict) and bool(state.get("ready"))
     regime = str(state.get("regime") or "UNDEFINED") if ready else "UNDEFINED"
     pbig15 = _number(state.get("p_big_15"))
     persistent = _number(state.get("p_persistent_30"))
     return {
-        "definable": bool(ready and int(state.get("analog_count") or 0) >= 25),
+        "definable": False,
         "current_regime": regime,
-        "confidence": min(1.0, _number(state.get("effective_analogs")) / 40.0),
+        "confidence": 0.0,
         "persistence_15": 1.0 - _number(state.get("p_reversal_15")),
         "persistence_30": persistent,
-        "expected_duration_minutes": 5.0 + 10.0 * (1.0 - _number(state.get("p_reversal_15"))) + 15.0 * persistent,
-        "successor_probabilities": {
-            "QUIET": max(0.0, 1.0 - pbig15),
-            "EXPANSION": pbig15,
-        },
+        "expected_duration_minutes": 0.0,
+        "successor_probabilities": {"QUIET": max(0.0, 1.0 - pbig15), "EXPANSION": pbig15},
         "most_likely_successor": "EXPANSION" if pbig15 > 0.5 else "QUIET",
         "successor_confidence": max(pbig15, 1.0 - pbig15),
+        "source": "non_authoritative_fallback",
     }
 
 
@@ -149,9 +145,7 @@ def _best(candidates: list[dict[str, Any]], families: set[str] | None = None) ->
     rows = _eligible(candidates)
     if families is not None:
         rows = [row for row in rows if str(row.get("strategy") or "") in families]
-    if not rows:
-        return None
-    return max(rows, key=_utility)
+    return max(rows, key=_utility) if rows else None
 
 
 def _economics(candidate: dict[str, Any] | None) -> dict[str, Any]:
@@ -187,20 +181,10 @@ def _targets(playbook: str, risk: float) -> tuple[float, float, float, float]:
     return max(5.0, 0.10 * risk), max(15.0, 0.30 * risk), max(9.0, 0.28 * risk), 15.0
 
 
-def _evidence_status(playbook: str, history: dict[str, Any] | None) -> str:
+def _evidence_status(history: dict[str, Any] | None) -> str:
     history = history or {}
-    samples = int(history.get("samples") or 0)
-    mean_pnl = _number(history.get("mean_pnl"))
-    win_rate = _number(history.get("win_rate"))
-    if playbook in {PLAYBOOK_DIRECTIONAL, PLAYBOOK_RANGE} and samples < 10:
-        return "RESEARCH_VALIDATED_FORWARD_PENDING"
-    if samples >= 20 and mean_pnl < 0:
-        return "NARROW_OR_RETIRE"
-    if samples >= 12 and mean_pnl > 0 and win_rate >= 0.55:
-        return "REPEATABLE"
-    if samples >= 8:
-        return "PROVISIONAL"
-    return "EXPERIMENTAL"
+    status = str(history.get("status") or "")
+    return status if status else "EXPERIMENTAL"
 
 
 def _setup_key(now: datetime, regime: str, playbook: str, direction: str, successor: str) -> str:
@@ -208,21 +192,20 @@ def _setup_key(now: datetime, regime: str, playbook: str, direction: str, succes
 
 
 def build_agent_plan(
-    beta: dict[str, Any],
+    market: dict[str, Any],
     candidates: list[dict[str, Any]],
     *,
     now: datetime,
     playbook_history: dict[str, dict[str, Any]] | None = None,
 ) -> AgentPlan:
-    """Implement Steps 1-9 of the closed-loop trader decision system.
+    """Implement Steps 1-9 with explicit separation of authorities.
 
-    Candidate valuation is deliberately downstream of the regime thesis. Positive
-    option EV alone never creates a trade. The market must be definable, the edge
-    must have a playbook, the entry timing must be appropriate, and the exact
-    structure must survive a three-times execution-drag stress test.
+    `market.regime_forecast` must come from Alpha's lifecycle engine. Beta HGB and
+    predictive-state outputs are independent witnesses. Candidate valuation is
+    downstream of both. Positive option EV alone never creates a trade.
     """
     playbook_history = playbook_history or {}
-    regime = _regime(beta)
+    regime = _regime(market)
     current = str(regime.get("current_regime") or "UNDEFINED")
     confidence = _number(regime.get("confidence"))
     p15 = _number(regime.get("persistence_15"))
@@ -233,13 +216,18 @@ def build_agent_plan(
         successors = {}
     successor = str(regime.get("most_likely_successor") or "UNDEFINED")
     successor_conf = _number(regime.get("successor_confidence"))
-    state = beta.get("predictive_state") or {}
-    hgb = beta.get("hgb_direction") or {}
+    state = market.get("predictive_state") or {}
+    hgb = market.get("hgb_direction") or {}
     local = now.astimezone(ET)
+    alpha_regime = market.get("alpha_regime") or {}
+    lifecycle = market.get("lifecycle") or {}
 
     diagnostics = {
         "regime": current,
         "regime_confidence": confidence,
+        "regime_authority": market.get("regime_authority"),
+        "lifecycle_authority": market.get("lifecycle_authority"),
+        "lifecycle_source": regime.get("source") or lifecycle.get("source"),
         "persistence_15": p15,
         "persistence_30": p30,
         "expected_duration_minutes": duration,
@@ -247,10 +235,14 @@ def build_agent_plan(
         "most_likely_successor": successor,
         "successor_confidence": successor_conf,
         "candidate_count": len(candidates),
+        "alpha_conflict_score": _number(alpha_regime.get("conflict_score")) if isinstance(alpha_regime, dict) else None,
+        "beta_regime_witness": market.get("beta_regime_forecast"),
     }
 
+    if market.get("regime_authority") not in {None, "alpha_hierarchical_regime"}:
+        return AgentPlan("NO_TRADE", "invalid_regime_authority", PLAYBOOK_NONE, None, None, diagnostics)
     if not bool(regime.get("definable")) or confidence < 0.40:
-        return AgentPlan("NO_TRADE", "regime_not_definable", PLAYBOOK_NONE, None, None, diagnostics)
+        return AgentPlan("NO_TRADE", "regime_or_lifecycle_not_definable", PLAYBOOK_NONE, None, None, diagnostics)
     if duration < 8.0:
         return AgentPlan("NO_TRADE", "regime_duration_too_uncertain", PLAYBOOK_NONE, None, None, diagnostics)
 
@@ -267,20 +259,31 @@ def build_agent_plan(
     pbig15 = _number(state.get("p_big_15")) if isinstance(state, dict) else 0.0
     reversal15 = _number(state.get("p_reversal_15")) if isinstance(state, dict) else 0.0
 
+    opposite_successor = (
+        hgb_eligible
+        and successor_conf >= 0.45
+        and (
+            (hgb_direction == "BULLISH" and successor == "DIRECTIONAL_DOWN")
+            or (hgb_direction == "BEARISH" and successor == "DIRECTIONAL_UP")
+        )
+    )
+    if opposite_successor:
+        return AgentPlan("WAIT", "beta_direction_conflicts_with_high_confidence_alpha_transition", PLAYBOOK_NONE, None, None, diagnostics)
+
     if hgb_eligible and hgb_strength >= 0.35:
         playbook = PLAYBOOK_DIRECTIONAL
         direction = "BULLISH" if hgb_direction == "BULLISH" else "BEARISH"
-        edge_source = "validated_hgb_direction_plus_state_distribution"
+        edge_source = "beta_hgb_direction_witness_plus_alpha_lifecycle"
         families = DIRECTIONAL_BULLISH if direction == "BULLISH" else DIRECTIONAL_BEARISH
         candidate = _best(candidates, families)
         if candidate is None:
             return AgentPlan("WAIT", "directional_edge_but_no_efficient_structure", playbook, None, None, diagnostics)
         if p15 < 0.40:
             entry_mode = ENTRY_WAIT_CONFIRMATION
-            entry_trigger = "regime_persistence_15_must_recover_above_0.40"
+            entry_trigger = "alpha_regime_persistence_15_must_recover_above_0.40"
     elif current == "QUIET" and p30 >= 0.72 and pbig15 <= 0.38:
         playbook = PLAYBOOK_RANGE
-        edge_source = "persistent_quiet_state_plus_option_carry"
+        edge_source = "alpha_persistent_quiet_regime_plus_option_carry"
         if local.hour < 14 or (local.hour == 14 and local.minute < 45):
             entry_mode = ENTRY_WAIT_PRICE
             entry_trigger = "late_session_range_window_14:45_ET_or_later"
@@ -289,12 +292,12 @@ def build_agent_plan(
         candidate = _best(candidates, RANGE_FAMILIES)
     elif current == "EXPANSION" and pbig15 >= 0.50:
         playbook = PLAYBOOK_LONG_VOL
-        edge_source = "current_volatility_expansion"
+        edge_source = "alpha_expansion_regime_confirmed_by_beta_big_move_probability"
         candidate = _best(candidates, LONG_VOL_FAMILIES)
     elif current in {"DIRECTIONAL_UP", "DIRECTIONAL_DOWN"} and reversal15 >= 0.58:
         playbook = PLAYBOOK_MEAN_REVERSION
         direction = "BEARISH" if current == "DIRECTIONAL_UP" else "BULLISH"
-        edge_source = "high_state_conditioned_reversal_probability"
+        edge_source = "alpha_directional_regime_plus_beta_reversal_probability"
         families = DIRECTIONAL_BEARISH if direction == "BEARISH" else DIRECTIONAL_BULLISH
         candidate = _best(candidates, families)
         entry_mode = ENTRY_WAIT_CONFIRMATION
@@ -302,14 +305,14 @@ def build_agent_plan(
     elif successor in {"DIRECTIONAL_UP", "DIRECTIONAL_DOWN", "EXPANSION"} and successor_conf >= 0.38:
         playbook = PLAYBOOK_TRANSITION
         direction = "BULLISH" if successor == "DIRECTIONAL_UP" else "BEARISH" if successor == "DIRECTIONAL_DOWN" else "NEUTRAL"
-        edge_source = "forecast_successor_regime"
+        edge_source = "alpha_lifecycle_successor_regime_forecast"
         if successor == "EXPANSION":
             candidate = _best(candidates, LONG_VOL_FAMILIES)
         else:
             families = DIRECTIONAL_BULLISH if direction == "BULLISH" else DIRECTIONAL_BEARISH
             candidate = _best(candidates, families)
         entry_mode = ENTRY_WAIT_TRANSITION
-        entry_trigger = f"current_regime_must_transition_to_{successor}"
+        entry_trigger = f"alpha_regime_must_transition_to_{successor}"
     else:
         best_any = _best(candidates)
         if best_any is not None and _robust_ev(best_any) >= 12.0 and _number(best_any.get("probability_profit")) >= 0.62:
@@ -318,6 +321,18 @@ def build_agent_plan(
             candidate = best_any
         else:
             return AgentPlan("NO_TRADE", "no_monetizable_current_or_transition_edge", PLAYBOOK_NONE, None, None, diagnostics)
+
+    governance = playbook_history.get(playbook, {})
+    evidence = _evidence_status(governance)
+    if evidence in {"NARROW_OR_RETIRE", "RETIRED"}:
+        return AgentPlan(
+            "NO_TRADE",
+            "playbook_governance_block",
+            playbook,
+            None,
+            None,
+            {**diagnostics, "playbook_governance": governance},
+        )
 
     if candidate is None:
         return AgentPlan("WAIT", "edge_identified_but_no_efficient_instrument", playbook, None, None, diagnostics)
@@ -331,25 +346,31 @@ def build_agent_plan(
     if risk <= 0.0 or risk > 100.0:
         return AgentPlan("NO_TRADE", "instrument_risk_not_tolerable", playbook, None, None, diagnostics)
     if robust_ev < min_edge or pop < min_pop:
-        return AgentPlan("WAIT", "strategy_edge_does_not_clear_cost_hurdle", playbook, None, None, {**diagnostics, "economics": economics})
+        return AgentPlan(
+            "WAIT",
+            "strategy_edge_does_not_clear_cost_hurdle",
+            playbook,
+            None,
+            None,
+            {**diagnostics, "economics": economics, "playbook_governance": governance},
+        )
 
     first, second, stop, expected_time = _targets(playbook, risk)
     time_stop = min(max(expected_time * 1.35, expected_time + 5.0), max(duration, expected_time + 5.0))
     setup_life = 5.0 if playbook == PLAYBOOK_DIRECTIONAL else 10.0 if playbook != PLAYBOOK_RANGE else 15.0
-    successor_probs = {str(k): _number(v) for k, v in successors.items()}
-    evidence = _evidence_status(playbook, playbook_history.get(playbook))
+    successor_probs = {str(key): _number(value) for key, value in successors.items()}
     setup_key = _setup_key(now, current, playbook, direction, successor)
 
     invalidation = [
         "regime_becomes_undefined",
-        "regime_thesis_probability_collapses",
+        "alpha_lifecycle_probability_collapses",
         "better_forward_risk_reward_no_longer_compensates_for_hold",
         "maximum_loss_or_playbook_stop_reached",
     ]
     if playbook == PLAYBOOK_DIRECTIONAL:
-        invalidation.extend(("validated_hgb_flips_direction", "successor_probability_shifts_to_opposite_direction"))
+        invalidation.extend(("validated_hgb_flips_direction", "alpha_successor_probability_shifts_to_opposite_direction"))
     elif playbook == PLAYBOOK_RANGE:
-        invalidation.extend(("p_big_15_rises_above_0.50", "implied_volatility_rises_5_points_from_entry", "regime_changes_to_expansion_or_directional"))
+        invalidation.extend(("p_big_15_rises_above_0.50", "implied_volatility_rises_5_points_from_entry", "alpha_regime_changes_to_expansion_or_directional"))
     elif playbook == PLAYBOOK_LONG_VOL:
         invalidation.extend(("p_big_15_collapses_below_0.35", "implied_volatility_collapses_5_points_without_underlying_move"))
 
@@ -386,13 +407,18 @@ def build_agent_plan(
         scale_conditions=(
             "first_profit_target_reached",
             "thesis_remains_valid",
-            "regime_persistence_not_deteriorating",
+            "alpha_regime_persistence_not_deteriorating",
         ),
         economics=economics,
         evidence_status=evidence,
         setup_key=setup_key,
     )
-    diagnostics = {**diagnostics, "economics": economics, "evidence_status": evidence}
+    diagnostics = {
+        **diagnostics,
+        "economics": economics,
+        "evidence_status": evidence,
+        "playbook_governance": governance,
+    }
 
     if entry_mode != ENTRY_NOW:
         return AgentPlan("WAIT", "valid_edge_waiting_for_entry_trigger", playbook, candidate, thesis, diagnostics)
