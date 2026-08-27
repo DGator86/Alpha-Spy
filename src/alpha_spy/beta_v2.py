@@ -21,7 +21,7 @@ class BetaV2State:
     version: str
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "BetaV2State":
+    def from_payload(cls, payload: dict[str, Any]) -> BetaV2State:
         raw_ts = str(payload.get("timestamp") or "")
         timestamp = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
         if timestamp.tzinfo is None:
