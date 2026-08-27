@@ -21,7 +21,7 @@ class BetaOpportunity:
     config_sha256: str
 
     @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> "BetaOpportunity":
+    def from_payload(cls, payload: dict[str, Any]) -> BetaOpportunity:
         raw_time = str(payload.get("timestamp") or "")
         timestamp = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
         if timestamp.tzinfo is None:
@@ -47,7 +47,7 @@ def opportunity_from_beta_state(state: dict[str, Any]) -> BetaOpportunity | None
     """Read the handoff from Beta's API state without depending on its option plan.
 
     The research branch accepts either a top-level `opportunity` key or the
-    eventual canonical `snapshot.opportunity` location.  Beta's legacy
+    eventual canonical `snapshot.opportunity` location. Beta's legacy
     `option_plan` and `decision.structure` are intentionally ignored.
     """
 
