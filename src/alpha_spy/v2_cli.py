@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import load_config
 from .db import Journal
-from .v2_services import V2EngineService
+from .v2_engine import V2EngineService
 from .v2_streaming_market import V2StreamingMarketService
 
 
@@ -37,7 +37,7 @@ def _config(args: argparse.Namespace):
         config.paths.model_dir = root / "models"
         config.paths.report_dir = root / "reports"
         config.create_directories()
-    # V2 is intentionally paper/sandbox only until blind validation passes.
+    # V2 is paper/sandbox only until blind validation passes.
     config.trading.paper_mode = True
     if config.tradier.environment == "production":
         config.trading.submit_orders = False
