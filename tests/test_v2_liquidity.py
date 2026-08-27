@@ -4,7 +4,15 @@ from alpha_spy.beta_v2 import BetaV2State, attach_beta_v2_state
 from alpha_spy.liquidity_v2 import liquid_option_pool, option_liquidity
 
 
-def _option(symbol: str, strike: float, bid: float, ask: float, *, oi: int = 1000, volume: int = 100):
+def _option(
+    symbol: str,
+    strike: float,
+    bid: float,
+    ask: float,
+    *,
+    oi: int = 1000,
+    volume: int = 100,
+):
     return {
         "symbol": symbol,
         "strike": strike,
@@ -27,13 +35,30 @@ def test_liquidity_score_penalizes_wide_market() -> None:
     assert tight.relative_spread < wide.relative_spread
 
 
+def test_liquidity_restores_db_quote_depth_from_raw_payload() -> None:
+    row = _option("RAW_DEPTH", 700.0, 0.99, 1.00)
+    row.pop("bid_size")
+    row.pop("ask_size")
+    row["payload"] = {"bidsize": 37, "asksize": 29}
+
+    liquidity = option_liquidity(row)
+
+    assert liquidity is not None
+    assert liquidity.quoted_size == 29
+
+
 def test_liquid_pool_rejects_deceptively_cheap_wide_option() -> None:
     options = [
         _option("PENNY", 700.0, 0.49, 0.50),
         _option("CHEAP_WIDE", 701.0, 0.01, 0.05),
         {**_option("PUT_PENNY", 700.0, 0.48, 0.49), "right": "P"},
     ]
-    pool = liquid_option_pool(options, spot=700.0, max_spread_dollars=0.05, max_relative_spread=0.25)
+    pool = liquid_option_pool(
+        options,
+        spot=700.0,
+        max_spread_dollars=0.05,
+        max_relative_spread=0.25,
+    )
     symbols = {row["symbol"] for row in pool}
     assert "PENNY" in symbols
     assert "PUT_PENNY" in symbols
