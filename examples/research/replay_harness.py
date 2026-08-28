@@ -49,13 +49,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from alpha_spy.db import Journal  # noqa: E402
-from alpha_spy.regime import (  # noqa: E402
-    RegimeHierarchy,
-    classify_regime,
-    classify_regime_hierarchy,
-)
-from alpha_spy.timeutil import ET  # noqa: E402
+from alpha_spy.db import Journal
+from alpha_spy.regime import classify_regime_hierarchy
+from alpha_spy.timeutil import ET
 
 LOOKBACKS = {"micro": 45, "intraday": 240, "swing": 780, "structural": 1950}
 DIMENSIONS = (
