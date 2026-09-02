@@ -9,6 +9,7 @@ from . import v2_engine as engine_module
 from .timeutil import ET
 from .v2_hgb_vertical_repaired import build_hgb_vertical_candidate
 from .v2_lifecycle_survival import AlphaRiskSetLifecycleEngine
+from .v2_policy import CURRENT_POLICY_VERSION, POLICY_CONTRACT
 from .v2_regime_repaired import classify_regime_hierarchy
 from .v2_state_pq import generate_state_pq_candidates as _generate_state_pq_candidates
 from .v2_trader_agent import PLAYBOOK_DIRECTIONAL
@@ -80,6 +81,7 @@ def _generate_candidates_with_control(
         payload = dict(candidate.get("payload") or {})
         payload["source_option_chain_fingerprint"] = fingerprint
         payload["source_option_chain_contracts"] = len(options)
+        payload["policy_version"] = CURRENT_POLICY_VERSION
         candidate["payload"] = payload
     return state_prediction, candidates
 
@@ -96,6 +98,8 @@ def evidence_provenance(
         "evidence_class": _REPLAY_OR_UNVERIFIED,
         "actual_chain": False,
         "reason": "missing_snapshot_or_chain",
+        "policy_version": CURRENT_POLICY_VERSION,
+        "policy_contract": POLICY_CONTRACT,
     }
     if not snapshot or not chain:
         return detail
@@ -135,6 +139,8 @@ def evidence_provenance(
         "evidence_class": evidence_class,
         "actual_chain": bool(evidence_class == _FORWARD_ACTUAL_CHAIN),
         "reason": reason,
+        "policy_version": CURRENT_POLICY_VERSION,
+        "policy_contract": POLICY_CONTRACT,
         "classified_at": current.isoformat(),
         "snapshot_id": snapshot.get("snapshot_id"),
         "snapshot_captured_at": snapshot.get("captured_at"),
@@ -168,6 +174,7 @@ class V2EngineService(engine_module.V2EngineService):
             self.journal.get_control(_DIRECTIONAL_DATE_CONTROL) == session_date
         )
         market_state["lifecycle_authority"] = "alpha_discrete_time_risk_set_survival"
+        market_state["policy_version"] = CURRENT_POLICY_VERSION
         return market_state, alpha_regime, lifecycle
 
     def _preview_fee_gate(self, candidate: dict[str, Any]):
@@ -222,9 +229,19 @@ class V2EngineService(engine_module.V2EngineService):
                     continue
 
                 candidate_fingerprint = str(inner.get("source_option_chain_fingerprint") or "")
+                candidate_policy = str(inner.get("policy_version") or "")
                 provenance = dict(base_provenance)
                 if provenance.get("evidence_class") == _FORWARD_ACTUAL_CHAIN:
-                    if not candidate_fingerprint or candidate_fingerprint != current_fingerprint:
+                    if candidate_policy != CURRENT_POLICY_VERSION:
+                        provenance.update(
+                            {
+                                "evidence_class": _REPLAY_OR_UNVERIFIED,
+                                "actual_chain": False,
+                                "reason": "candidate_policy_version_mismatch",
+                                "candidate_policy_version": candidate_policy or None,
+                            }
+                        )
+                    elif not candidate_fingerprint or candidate_fingerprint != current_fingerprint:
                         provenance.update(
                             {
                                 "evidence_class": _REPLAY_OR_UNVERIFIED,
@@ -241,6 +258,7 @@ class V2EngineService(engine_module.V2EngineService):
                             "source_option_chain_contracts"
                         )
 
+                thesis["policy_version"] = CURRENT_POLICY_VERSION
                 thesis["evidence_provenance"] = provenance
                 inner["trade_thesis"] = thesis
                 candidate["payload"] = inner
