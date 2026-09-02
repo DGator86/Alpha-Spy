@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime
 from typing import Any
 
 from . import v2_engine as engine_module
@@ -12,7 +14,10 @@ from .v2_trader_agent import PLAYBOOK_DIRECTIONAL
 from .v2_trader_agent_repaired import build_agent_plan
 
 _HGB_AUTHORITY = "beta_v2_hgb_blocked_walk_forward"
+_TRADER_AGENT_AUTHORITY = "alpha_v2_closed_loop_trader_agent"
 _DIRECTIONAL_DATE_CONTROL = "v2_directional_setup_session_date"
+_FORWARD_ACTUAL_CHAIN = "FORWARD_ACTUAL_CHAIN"
+_REPLAY_OR_UNVERIFIED = "REPLAY_OR_UNVERIFIED"
 
 
 def _generate_candidates_with_control(
@@ -44,6 +49,78 @@ def _generate_candidates_with_control(
     return state_prediction, candidates
 
 
+def evidence_provenance(
+    snapshot: dict[str, Any] | None,
+    chain: dict[str, Any] | None,
+    *,
+    now: datetime,
+    maximum_age_seconds: float = 180.0,
+) -> dict[str, Any]:
+    """Classify whether a trade is untouched forward evidence using a real chain.
+
+    Historical replay is valuable research, but it must never be able to promote
+    itself into Step-16 execution authority. Forward evidence requires a fresh
+    production-stream market snapshot and a fresh verified Tradier option chain.
+    Anything else remains replay/unverified even if its simulated P&L is excellent.
+    """
+    detail: dict[str, Any] = {
+        "evidence_class": _REPLAY_OR_UNVERIFIED,
+        "actual_chain": False,
+        "reason": "missing_snapshot_or_chain",
+    }
+    if not snapshot or not chain:
+        return detail
+    try:
+        snapshot_at = engine_module._parse_time(snapshot.get("captured_at"))
+        chain_at = engine_module._parse_time(chain.get("captured_at"))
+    except (TypeError, ValueError):
+        return {**detail, "reason": "invalid_evidence_timestamp"}
+
+    current = now.astimezone(UTC)
+    snapshot_age = (current - snapshot_at).total_seconds()
+    chain_age = (current - chain_at).total_seconds()
+    pair_age = abs((snapshot_at - chain_at).total_seconds())
+    snapshot_source = str(snapshot.get("source") or "")
+    chain_source = str(chain.get("source") or "")
+    snapshot_integrity = str(snapshot.get("integrity") or "")
+    chain_integrity = str(chain.get("integrity") or "")
+    production_snapshot = snapshot_source == "tradier_production_stream"
+    production_chain = chain_source == "tradier"
+    fresh = (
+        -5.0 <= snapshot_age <= maximum_age_seconds
+        and -5.0 <= chain_age <= maximum_age_seconds
+        and pair_age <= maximum_age_seconds
+    )
+    verified = snapshot_integrity == "VERIFIED" and chain_integrity == "VERIFIED"
+    evidence_class = (
+        _FORWARD_ACTUAL_CHAIN
+        if production_snapshot and production_chain and fresh and verified
+        else _REPLAY_OR_UNVERIFIED
+    )
+    reason = (
+        "fresh_verified_tradier_snapshot_and_chain"
+        if evidence_class == _FORWARD_ACTUAL_CHAIN
+        else "not_fresh_verified_production_snapshot_and_chain"
+    )
+    return {
+        "evidence_class": evidence_class,
+        "actual_chain": bool(evidence_class == _FORWARD_ACTUAL_CHAIN),
+        "reason": reason,
+        "classified_at": current.isoformat(),
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "snapshot_captured_at": snapshot.get("captured_at"),
+        "snapshot_source": snapshot_source,
+        "snapshot_integrity": snapshot_integrity,
+        "chain_snapshot_id": chain.get("chain_snapshot_id"),
+        "chain_captured_at": chain.get("captured_at"),
+        "chain_source": chain_source,
+        "chain_integrity": chain_integrity,
+        "snapshot_age_seconds": snapshot_age,
+        "chain_age_seconds": chain_age,
+        "snapshot_chain_delta_seconds": pair_age,
+    }
+
+
 # Keep the mature V2 service implementation, but repair the three authorities
 # exposed by chronological replay. Module globals are resolved at runtime by the
 # base service, so these substitutions affect the inherited service without
@@ -63,6 +140,7 @@ class V2EngineService(engine_module.V2EngineService):
     - Step 5 grants the validated HGB directional lane one setup per session.
     - P/Q remains authoritative for challenger geometry, not for revoking the HGB
       control signal.
+    - Closed positions carry evidence lineage so replay cannot promote itself.
     """
 
     def _market_intelligence(self, **kwargs: Any):
@@ -105,10 +183,47 @@ class V2EngineService(engine_module.V2EngineService):
             "robust_ev_after_preview_fees": None,
         }
 
+    def _annotate_open_position_evidence(self, snapshot: dict[str, Any]) -> None:
+        chain, _ = self.journal.latest_option_chain("SPY")
+        provenance = evidence_provenance(
+            snapshot,
+            chain,
+            now=datetime.now(UTC),
+            maximum_age_seconds=max(
+                180.0,
+                float(self.config.market.option_quote_stale_seconds),
+            ),
+        )
+        with self.journal.transaction() as con:
+            rows = con.execute(
+                "SELECT position_id,payload_json FROM positions WHERE status='OPEN'"
+            ).fetchall()
+            for row in rows:
+                try:
+                    payload = json.loads(row["payload_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    continue
+                candidate = payload.get("candidate") or {}
+                inner = candidate.get("payload") or {}
+                if str(inner.get("authority") or "") != _TRADER_AGENT_AUTHORITY:
+                    continue
+                thesis = inner.get("trade_thesis") or {}
+                if not isinstance(thesis, dict) or thesis.get("evidence_provenance"):
+                    continue
+                thesis["evidence_provenance"] = provenance
+                inner["trade_thesis"] = thesis
+                candidate["payload"] = inner
+                payload["candidate"] = candidate
+                con.execute(
+                    "UPDATE positions SET payload_json=? WHERE position_id=? AND status='OPEN'",
+                    (self.journal._json(payload), row["position_id"]),
+                )
+
     def run_once(self) -> str | None:
         result = super().run_once()
         snapshot = self.journal.latest_snapshot()
         if snapshot:
+            self._annotate_open_position_evidence(snapshot)
             stamp = engine_module._parse_time(snapshot["captured_at"])
             session_date = stamp.astimezone(ET).date().isoformat()
             directional_key = "|".join(
