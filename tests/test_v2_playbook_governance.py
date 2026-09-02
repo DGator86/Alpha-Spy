@@ -92,7 +92,7 @@ def test_tiny_sample_cannot_promote_playbook(tmp_path):
     assert status["execution_eligible"] is False
 
 
-def test_twenty_positive_replay_examples_remain_challenger():
+def test_twenty_positive_replay_examples_remain_challenger(tmp_path):
     journal = Journal(tmp_path / "alpha.db")
     for index in range(20):
         _insert_closed(
