@@ -11,15 +11,27 @@ from .regime import RegimeHierarchy, RegimeState, _context_labels
 from .timeutil import ET
 
 
-def tie_aware_percentile(history: np.ndarray, current: float) -> float:
-    """Empirical mid-rank percentile that cannot turn a tied floor into 100%.
+_CONFLICT_WEIGHTS = {
+    "volatility": 0.35,
+    "correlation": 0.25,
+    "breadth": 0.30,
+    "concentration": 0.10,
+}
 
-    Alpha clips realized volatility to a configured floor. A conventional
-    ``mean(history <= current)`` assigns every tied floor observation the maximum
-    empirical rank and can therefore label the quietest possible observation as
-    crisis volatility. Mid-rank ECDF treatment assigns half of the tied mass below
-    and half above the observation, which is the correct rank treatment here.
-    """
+_VOLATILITY_ORDER = {"low": 0.0, "normal": 1.0 / 3.0, "high": 2.0 / 3.0, "crisis": 1.0}
+_CORRELATION_ORDER = {
+    "falling": 0.0,
+    "stable": 1.0 / 3.0,
+    "rising": 2.0 / 3.0,
+    "dislocated": 1.0,
+    "unknown_correlation": 0.5,
+}
+_BREADTH_ORDER = {"broad_down": 0.0, "mixed": 0.5, "broad_up": 1.0}
+_CONCENTRATION_ORDER = {"distributed": 0.0, "concentrated": 1.0}
+
+
+def tie_aware_percentile(history: np.ndarray, current: float) -> float:
+    """Empirical mid-rank percentile that cannot turn a tied floor into 100%."""
     values = np.asarray(history, dtype=float)
     values = values[np.isfinite(values)]
     if values.size == 0:
@@ -27,6 +39,58 @@ def tie_aware_percentile(history: np.ndarray, current: float) -> float:
     below = float(np.mean(values < current))
     tied = float(np.mean(values == current))
     return float(np.clip(below + 0.5 * tied, 0.0, 1.0))
+
+
+def _horizon_ewma(current: float, history: np.ndarray, lookback: int) -> float:
+    """Causal level state with a half-life tied to the hierarchy horizon.
+
+    ``history`` is newest-first and excludes the current observation. The old
+    hierarchy used the same current breadth/concentration at every level, which
+    made those dimensions incapable of expressing cross-horizon disagreement.
+    This smoother gives each level a genuinely different memory while keeping the
+    current observation highest-weighted.
+    """
+    values = np.asarray(history, dtype=float)
+    values = values[np.isfinite(values)]
+    values = values[: max(1, int(lookback))]
+    series = np.concatenate(([float(current)], values))
+    half_life = max(5.0, float(lookback) / 4.0)
+    ages = np.arange(series.size, dtype=float)
+    weights = np.exp(-np.log(2.0) * ages / half_life)
+    return float(np.dot(series, weights) / np.sum(weights))
+
+
+def _range_disagreement(
+    states: list[RegimeState],
+    field: str,
+    mapping: dict[str, float],
+) -> float:
+    values = [mapping.get(str(getattr(state, field)), 0.5) for state in states]
+    if not values:
+        return 0.0
+    return float(max(values) - min(values))
+
+
+def hierarchy_conflict_score(levels: dict[str, RegimeState]) -> float:
+    """Weighted cross-horizon disagreement on fields that can vary by horizon.
+
+    The production V1 score used breadth and risk tone, but both were identical at
+    every level, making the score identically zero. V2 measures disagreement in
+    four level-specific dimensions. The result remains on [0, 1], preserving the
+    existing 0.65 transition threshold and downstream confidence scaling.
+    """
+    states = list(levels.values())
+    score = (
+        _CONFLICT_WEIGHTS["volatility"]
+        * _range_disagreement(states, "volatility", _VOLATILITY_ORDER)
+        + _CONFLICT_WEIGHTS["correlation"]
+        * _range_disagreement(states, "correlation", _CORRELATION_ORDER)
+        + _CONFLICT_WEIGHTS["breadth"]
+        * _range_disagreement(states, "breadth", _BREADTH_ORDER)
+        + _CONFLICT_WEIGHTS["concentration"]
+        * _range_disagreement(states, "concentration", _CONCENTRATION_ORDER)
+    )
+    return float(np.clip(score, 0.0, 1.0))
 
 
 def classify_regime(
@@ -39,7 +103,7 @@ def classify_regime(
     lookback: int = 240,
     context: MarketContext | None = None,
 ) -> RegimeState:
-    """Causal Alpha regime classifier with tie-safe volatility ranks."""
+    """Causal Alpha regime classifier with level-specific state and tie-safe ranks."""
     with journal.session() as con:
         rows = con.execute(
             """
@@ -60,11 +124,23 @@ def classify_regime(
         [float(row["correlation"]) for row in rows if row["correlation"] is not None],
         dtype=float,
     )
-    realized_vol = float(feature.get("realized_vol") or 0.0)
-    current_corr = feature.get("correlation")
+    breadth_hist = np.asarray(
+        [float(row["breadth"]) for row in rows if row["breadth"] is not None],
+        dtype=float,
+    )
+    concentration_hist = np.asarray(
+        [
+            float(row["concentration"])
+            for row in rows
+            if row["concentration"] is not None
+        ],
+        dtype=float,
+    )
 
+    realized_vol = float(feature.get("realized_vol") or 0.0)
+    level_vol = _horizon_ewma(realized_vol, vol_hist, lookback)
     if vol_hist.size >= 20:
-        vol_q = tie_aware_percentile(vol_hist, realized_vol)
+        vol_q = tie_aware_percentile(vol_hist, level_vol)
         volatility = (
             "low"
             if vol_q < 0.25
@@ -77,14 +153,19 @@ def classify_regime(
     else:
         volatility = "normal"
 
+    current_corr = feature.get("correlation")
     if current_corr is None or not np.isfinite(float(current_corr)):
         correlation = "unknown_correlation"
     else:
-        current = float(current_corr)
-        corr_q = tie_aware_percentile(corr_hist, current) if corr_hist.size >= 20 else 0.5
+        level_corr = _horizon_ewma(float(current_corr), corr_hist, lookback)
+        corr_q = (
+            tie_aware_percentile(corr_hist, level_corr)
+            if corr_hist.size >= 20
+            else 0.5
+        )
         if corr_hist.size >= 20:
-            recent_n = min(5, len(corr_hist))
-            prior_n = min(20, len(corr_hist))
+            recent_n = min(max(5, lookback // 20), len(corr_hist))
+            prior_n = min(max(recent_n + 5, lookback // 5), len(corr_hist))
             recent = float(np.mean(corr_hist[:recent_n]))
             prior = (
                 float(np.mean(corr_hist[recent_n:prior_n]))
@@ -96,7 +177,7 @@ def classify_regime(
             delta = 0.0
         correlation = (
             "dislocated"
-            if corr_q > 0.95 or current >= 0.90
+            if corr_q > 0.95 or level_corr >= 0.90
             else "rising"
             if delta > 0.03
             else "falling"
@@ -104,7 +185,8 @@ def classify_regime(
             else "stable"
         )
 
-    breadth_value = float(feature.get("breadth") or 0.5)
+    breadth_current = float(feature.get("breadth") or 0.5)
+    breadth_value = _horizon_ewma(breadth_current, breadth_hist, lookback)
     breadth = (
         "broad_up"
         if breadth_value >= 0.70
@@ -112,7 +194,13 @@ def classify_regime(
         if breadth_value <= 0.30
         else "mixed"
     )
-    concentration_value = float(feature.get("concentration") or 0.0)
+
+    concentration_current = float(feature.get("concentration") or 0.0)
+    concentration_value = _horizon_ewma(
+        concentration_current,
+        concentration_hist,
+        lookback,
+    )
     concentration = "concentrated" if concentration_value >= 0.18 else "distributed"
 
     local = timestamp.astimezone(ET).timetz().replace(tzinfo=None)
@@ -206,15 +294,7 @@ def classify_regime_hierarchy(
             context=context,
         ),
     }
-    signs: list[float] = []
-    for state in levels.values():
-        if state.breadth == "broad_up" or state.risk_tone == "risk_on":
-            signs.append(1.0)
-        elif state.breadth == "broad_down" or state.risk_tone == "risk_off":
-            signs.append(-1.0)
-        else:
-            signs.append(0.0)
-    conflict_score = float(np.std(signs))
+    conflict_score = hierarchy_conflict_score(levels)
     transition = conflict_score >= 0.65 or any(
         state.transition_risk for state in levels.values()
     )
