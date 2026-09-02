@@ -17,6 +17,8 @@ class HGBVerticalConfig:
     min_open_interest: int = 25
     min_volume: int = 1
     min_displayed_size: int = 1
+    minimum_net_delta: float = 0.08
+    minimum_signal_edge_to_execution_drag: float = 3.0
     entry_mid_capture_fraction: float = 0.65
     estimated_pass_through_fee_per_contract_side: float = 0.03
     max_estimated_execution_drag_dollars: float = 6.00
@@ -50,6 +52,18 @@ def _displayed_size(option: dict[str, Any], side: str) -> int:
         return max(0, int(float(payload.get(raw_key) or 0)))
     except (TypeError, ValueError, AttributeError):
         return 0
+
+
+def _delta(option: dict[str, Any]) -> float | None:
+    value = option.get("delta")
+    if value in (None, ""):
+        payload = option.get("payload") or {}
+        value = payload.get("delta") if isinstance(payload, dict) else None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _liquid(option: dict[str, Any], cfg: HGBVerticalConfig) -> bool:
@@ -98,18 +112,64 @@ def _pair_execution(
     }
 
 
+def _signal_economics(
+    long_leg: dict[str, Any],
+    short_leg: dict[str, Any],
+    *,
+    spot: float,
+    expected_return_bps: float,
+    execution: dict[str, float],
+    cfg: HGBVerticalConfig,
+) -> dict[str, float] | None:
+    """Translate the market forecast into first-order option dollars.
+
+    HGB direction is statistical evidence, not an economic edge by itself. Before
+    it can authorize a 0DTE vertical, the expected underlying move must have enough
+    first-order value through the *actual selected legs* to pay three times the
+    modeled round-trip execution drag. Missing greeks fail closed.
+    """
+    long_delta = _delta(long_leg)
+    short_delta = _delta(short_leg)
+    if long_delta is None or short_delta is None:
+        return None
+    net_delta = abs(long_delta - short_delta)
+    if net_delta < cfg.minimum_net_delta:
+        return None
+    expected_move_dollars = abs(expected_return_bps) * spot / 10_000.0
+    first_order_edge_dollars = expected_move_dollars * net_delta * 100.0
+    required_edge_dollars = (
+        cfg.minimum_signal_edge_to_execution_drag
+        * float(execution["estimated_execution_drag_dollars"])
+    )
+    if first_order_edge_dollars + 1e-9 < required_edge_dollars:
+        return None
+    return {
+        "expected_underlying_move_dollars": expected_move_dollars,
+        "long_delta": long_delta,
+        "short_delta": short_delta,
+        "net_delta": net_delta,
+        "first_order_signal_edge_dollars": first_order_edge_dollars,
+        "required_signal_edge_dollars": required_edge_dollars,
+        "signal_edge_to_execution_drag": (
+            first_order_edge_dollars
+            / max(float(execution["estimated_execution_drag_dollars"]), 1e-9)
+        ),
+    }
+
+
 def _candidate_pairs(
     options: list[dict[str, Any]],
     *,
     spot: float,
     bullish: bool,
+    expected_return_bps: float,
     cfg: HGBVerticalConfig,
-) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, float]]]:
+) -> list[tuple[dict[str, Any], dict[str, Any], dict[str, float], dict[str, float]]]:
     right = "C" if bullish else "P"
     rows = [row for row in options if row.get("right") == right and _liquid(row, cfg)]
     rows.sort(key=lambda row: float(row.get("strike") or 0.0))
     by_strike = {round(float(row["strike"]), 4): row for row in rows}
-    pairs: list[tuple[dict[str, Any], dict[str, Any], dict[str, float]]] = []
+    pairs: list[tuple[dict[str, Any], dict[str, Any], dict[str, float], dict[str, float]]] = []
     for long_leg in rows:
         long_strike = float(long_leg["strike"])
         if abs(long_strike - spot) > cfg.max_atm_distance + 1e-9:
@@ -127,7 +187,17 @@ def _candidate_pairs(
             continue
         if execution["estimated_execution_drag_dollars"] > cfg.max_estimated_execution_drag_dollars + 1e-9:
             continue
-        pairs.append((long_leg, short_leg, execution))
+        signal_economics = _signal_economics(
+            long_leg,
+            short_leg,
+            spot=spot,
+            expected_return_bps=expected_return_bps,
+            execution=execution,
+            cfg=cfg,
+        )
+        if signal_economics is None:
+            continue
+        pairs.append((long_leg, short_leg, execution, signal_economics))
     return pairs
 
 
@@ -141,8 +211,9 @@ def build_hgb_vertical_candidate(
     """Build the authoritative low-friction 15m V2 expression.
 
     This deliberately does not use Alpha's legacy P/Q expected-value gate. The
-    authority is the blocked walk-forward HGB direction signal; Alpha's job here
-    is execution quality, bounded risk, and deterministic 15-minute management.
+    authority is the blocked walk-forward HGB direction signal plus a first-order
+    economic check on the actual option legs; Alpha's job here is execution
+    quality, bounded risk, and deterministic 15-minute management.
     """
     cfg = config or HGBVerticalConfig()
     hgb = beta_opportunity.get("hgb_direction") or {}
@@ -154,21 +225,35 @@ def build_hgb_vertical_candidate(
     strength = float(hgb.get("strength") or 0.0)
     if strength < 0.35:
         return None
+    expected_return_bps = float(hgb.get("expected_return_bps") or 0.0)
+    if not math.isfinite(expected_return_bps) or expected_return_bps == 0.0:
+        return None
+    if (direction == "BULLISH" and expected_return_bps <= 0.0) or (
+        direction == "BEARISH" and expected_return_bps >= 0.0
+    ):
+        return None
     spot = float(prediction.get("spy_price") or 0.0)
     if spot <= 0:
         return None
 
     bullish = direction == "BULLISH"
-    pairs = _candidate_pairs(options, spot=spot, bullish=bullish, cfg=cfg)
+    pairs = _candidate_pairs(
+        options,
+        spot=spot,
+        bullish=bullish,
+        expected_return_bps=expected_return_bps,
+        cfg=cfg,
+    )
     if not pairs:
         return None
 
     # Preserve the validated ATM geometry first; among equally ATM pairs choose
-    # the one with the least estimated execution drag and then the tightest debit.
-    long_leg, short_leg, execution = min(
+    # the strongest edge/drag ratio, then the least estimated execution drag.
+    long_leg, short_leg, execution, signal_economics = min(
         pairs,
         key=lambda row: (
             abs(float(row[0]["strike"]) - spot),
+            -float(row[3]["signal_edge_to_execution_drag"]),
             float(row[2]["estimated_execution_drag_dollars"]),
             float(row[2]["planned_debit"]),
         ),
@@ -228,10 +313,11 @@ def build_hgb_vertical_candidate(
             "signal_strength": strength,
             "signal_hit_probability": signal_hit_probability,
             "signal_probability_up": probability_up,
-            "signal_expected_return_bps": float(hgb.get("expected_return_bps") or 0.0),
+            "signal_expected_return_bps": expected_return_bps,
             "signal_model_version": str(hgb.get("model_version") or ""),
             "core_prediction_bps": float(hgb.get("core_prediction_bps") or 0.0),
             "breadth_prediction_bps": float(hgb.get("breadth_prediction_bps") or 0.0),
+            "signal_economics": signal_economics,
             "long_quote": {
                 "symbol": long_leg["symbol"],
                 "bid": float(long_leg["bid"]),
