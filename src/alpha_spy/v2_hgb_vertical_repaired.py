@@ -3,7 +3,10 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .v2_hgb_vertical import HGBVerticalConfig, build_hgb_vertical_candidate as _build_candidate
+from .v2_hgb_vertical import (
+    HGBVerticalConfig,
+    build_hgb_vertical_candidate as _build_candidate,
+)
 
 _INTRINSIC_TOLERANCE = 0.02
 
@@ -43,11 +46,9 @@ def option_quote_sane(option: dict[str, Any], spot: float) -> bool:
     delta = _delta(option)
     if delta is None:
         return False
-    if right == "C" and not (0.0 <= delta <= 1.0):
-        return False
-    if right == "P" and not (-1.0 <= delta <= 0.0):
-        return False
-    return True
+    if right == "C":
+        return 0.0 <= delta <= 1.0
+    return -1.0 <= delta <= 0.0
 
 
 def build_hgb_vertical_candidate(
