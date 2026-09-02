@@ -7,6 +7,7 @@ from pathlib import Path
 from .config import load_config
 from .db import Journal
 from .v2_lifecycle_backfill import backfill_lifecycle_from_frozen_predictions
+from .v2_readiness import evaluate_readiness
 from .v2_runtime_repaired import V2EngineService
 from .v2_settlement_agent import V2SettlementService
 from .v2_streaming_market import V2StreamingMarketService
@@ -27,6 +28,7 @@ def parser() -> argparse.ArgumentParser:
     settlement.add_argument("--beta-state-url", default=None)
     backfill = sub.add_parser("lifecycle-backfill")
     backfill.add_argument("--limit", type=int, default=25000)
+    sub.add_parser("readiness")
     once = sub.add_parser("run-once")
     once.add_argument("service", choices=("market", "engine", "settlement"))
     once.add_argument("--beta-state-url", default=None)
@@ -77,6 +79,9 @@ def main() -> None:
     if args.command == "lifecycle-backfill":
         result = backfill_lifecycle_from_frozen_predictions(journal, limit=args.limit)
         print(json.dumps(result, indent=2, sort_keys=True))
+        return
+    if args.command == "readiness":
+        print(json.dumps(evaluate_readiness(journal), indent=2, sort_keys=True))
         return
     if args.command == "run-once":
         if args.service == "market":
