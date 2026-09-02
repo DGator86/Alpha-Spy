@@ -7,7 +7,7 @@ import numpy as np
 
 from .context import MarketContext
 from .db import Journal
-from .regime import _context_labels, RegimeHierarchy, RegimeState
+from .regime import RegimeHierarchy, RegimeState, _context_labels
 from .timeutil import ET
 
 
