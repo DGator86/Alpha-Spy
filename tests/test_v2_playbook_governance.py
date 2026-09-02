@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 from alpha_spy.db import Journal
 from alpha_spy.v2_playbook_governance import evaluate_playbooks
+from alpha_spy.v2_policy import CURRENT_POLICY_VERSION
 
 
 def _insert_closed(
@@ -13,6 +14,7 @@ def _insert_closed(
     process_score: float = 0.9,
     forward_actual_chain: bool = False,
     session_index: int | None = None,
+    policy_version: str = CURRENT_POLICY_VERSION,
 ):
     day_index = index if session_index is None else session_index
     opened = datetime(2026, 8, 1, 14, 0, tzinfo=UTC) + timedelta(days=day_index)
@@ -21,11 +23,13 @@ def _insert_closed(
             "evidence_class": "FORWARD_ACTUAL_CHAIN",
             "actual_chain": True,
             "chain_snapshot_id": f"OC-{index}",
+            "policy_version": policy_version,
         }
         if forward_actual_chain
         else {
             "evidence_class": "REPLAY_OR_UNVERIFIED",
             "actual_chain": False,
+            "policy_version": policy_version,
         }
     )
     payload = {
@@ -33,6 +37,7 @@ def _insert_closed(
             "payload": {
                 "trade_thesis": {
                     "playbook": playbook,
+                    "policy_version": policy_version,
                     "evidence_provenance": provenance,
                 }
             }
@@ -112,6 +117,24 @@ def test_twenty_positive_replay_examples_remain_challenger(tmp_path):
     assert status["execution_eligible"] is False
 
 
+def test_old_policy_forward_examples_cannot_promote_current_policy(tmp_path):
+    journal = Journal(tmp_path / "alpha.db")
+    for index in range(40):
+        _insert_closed(
+            journal,
+            index=index,
+            playbook="TEST_PLAYBOOK",
+            pnl=10.0,
+            forward_actual_chain=True,
+            policy_version="alpha-v2-old-policy",
+        )
+    status = evaluate_playbooks(journal)["TEST_PLAYBOOK"]
+    assert status["forward_actual_chain_samples"] == 0
+    assert status["policy_version"] == CURRENT_POLICY_VERSION
+    assert status["status"] == "CHALLENGER"
+    assert status["execution_eligible"] is False
+
+
 def test_twenty_positive_forward_actual_chain_examples_become_provisional(tmp_path):
     journal = Journal(tmp_path / "alpha.db")
     for index in range(20):
@@ -167,7 +190,7 @@ def test_many_correlated_trades_from_few_sessions_cannot_validate(tmp_path):
     assert status["forward_sessions"] == 5
     assert status["status"] == "CHALLENGER"
     assert status["execution_eligible"] is False
-    assert "fewer_than_10_independent_forward_sessions" in status["reasons"]
+    assert "fewer_than_10_current_policy_independent_forward_sessions" in status["reasons"]
 
 
 def test_positive_mean_with_wide_uncertainty_does_not_validate(tmp_path):
