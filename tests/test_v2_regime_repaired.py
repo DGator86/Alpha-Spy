@@ -49,10 +49,7 @@ def test_horizon_ewma_reacts_more_quickly_at_micro_horizon():
 
 def test_identical_hierarchy_has_zero_conflict():
     state = _state()
-    levels = {
-        name: state
-        for name in ("micro", "intraday", "swing", "structural")
-    }
+    levels = dict.fromkeys(("micro", "intraday", "swing", "structural"), state)
     assert hierarchy_conflict_score(levels) == 0.0
 
 
