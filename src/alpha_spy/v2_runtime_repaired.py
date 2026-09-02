@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -18,6 +19,38 @@ _TRADER_AGENT_AUTHORITY = "alpha_v2_closed_loop_trader_agent"
 _DIRECTIONAL_DATE_CONTROL = "v2_directional_setup_session_date"
 _FORWARD_ACTUAL_CHAIN = "FORWARD_ACTUAL_CHAIN"
 _REPLAY_OR_UNVERIFIED = "REPLAY_OR_UNVERIFIED"
+_CHAIN_FINGERPRINT_FIELDS = (
+    "symbol",
+    "expiration",
+    "right",
+    "strike",
+    "bid",
+    "ask",
+    "bid_size",
+    "ask_size",
+    "open_interest",
+    "volume",
+    "iv",
+    "delta",
+    "gamma",
+    "theta",
+    "vega",
+)
+
+
+def _chain_fingerprint(options: list[dict[str, Any]]) -> str:
+    """Stable SHA-256 over the actual option surface consumed by candidate design."""
+    normalized = []
+    for row in options:
+        normalized.append(
+            {
+                field: row.get(field)
+                for field in _CHAIN_FINGERPRINT_FIELDS
+            }
+        )
+    normalized.sort(key=lambda row: str(row.get("symbol") or ""))
+    encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _generate_candidates_with_control(
@@ -46,6 +79,13 @@ def _generate_candidates_with_control(
         payload["competes_with_full_47_family_universe"] = True
         control["payload"] = payload
         candidates.append(control)
+
+    fingerprint = _chain_fingerprint(options)
+    for candidate in candidates:
+        payload = dict(candidate.get("payload") or {})
+        payload["source_option_chain_fingerprint"] = fingerprint
+        payload["source_option_chain_contracts"] = len(options)
+        candidate["payload"] = payload
     return state_prediction, candidates
 
 
@@ -121,10 +161,10 @@ def evidence_provenance(
     }
 
 
-# Keep the mature V2 service implementation, but repair the three authorities
-# exposed by chronological replay. Module globals are resolved at runtime by the
-# base service, so these substitutions affect the inherited service without
-# duplicating its large orchestration method.
+# Keep the mature V2 service implementation, but repair the authorities exposed
+# by chronological replay. Module globals are resolved at runtime by the base
+# service, so these substitutions affect the inherited service without duplicating
+# its large orchestration method.
 engine_module.classify_regime_hierarchy = classify_regime_hierarchy
 engine_module.AlphaRegimeLifecycleEngine = AlphaRiskSetLifecycleEngine
 engine_module.generate_state_pq_candidates = _generate_candidates_with_control
@@ -132,16 +172,7 @@ engine_module.build_agent_plan = build_agent_plan
 
 
 class V2EngineService(engine_module.V2EngineService):
-    """Replay-repaired closed-loop paper trader.
-
-    - Alpha regime uses tie-safe empirical ranks.
-    - Step 3 uses blocked discrete-time risk-set survival.
-    - Step 4 successor direction is advisory until scored calibration earns it.
-    - Step 5 grants the validated HGB directional lane one setup per session.
-    - P/Q remains authoritative for challenger geometry, not for revoking the HGB
-      control signal.
-    - Closed positions carry evidence lineage so replay cannot promote itself.
-    """
+    """Replay-repaired closed-loop paper trader."""
 
     def _market_intelligence(self, **kwargs: Any):
         market_state, alpha_regime, lifecycle = super()._market_intelligence(**kwargs)
@@ -184,8 +215,9 @@ class V2EngineService(engine_module.V2EngineService):
         }
 
     def _annotate_open_position_evidence(self, snapshot: dict[str, Any]) -> None:
-        chain, _ = self.journal.latest_option_chain("SPY")
-        provenance = evidence_provenance(
+        chain, options = self.journal.latest_option_chain("SPY")
+        current_fingerprint = _chain_fingerprint(options)
+        base_provenance = evidence_provenance(
             snapshot,
             chain,
             now=datetime.now(UTC),
@@ -210,6 +242,27 @@ class V2EngineService(engine_module.V2EngineService):
                 thesis = inner.get("trade_thesis") or {}
                 if not isinstance(thesis, dict) or thesis.get("evidence_provenance"):
                     continue
+
+                candidate_fingerprint = str(inner.get("source_option_chain_fingerprint") or "")
+                provenance = dict(base_provenance)
+                if provenance.get("evidence_class") == _FORWARD_ACTUAL_CHAIN:
+                    if not candidate_fingerprint or candidate_fingerprint != current_fingerprint:
+                        provenance.update(
+                            {
+                                "evidence_class": _REPLAY_OR_UNVERIFIED,
+                                "actual_chain": False,
+                                "reason": "candidate_option_surface_does_not_match_verified_chain",
+                                "candidate_option_chain_fingerprint": candidate_fingerprint or None,
+                                "verified_option_chain_fingerprint": current_fingerprint,
+                            }
+                        )
+                    else:
+                        provenance["candidate_option_chain_fingerprint"] = candidate_fingerprint
+                        provenance["verified_option_chain_fingerprint"] = current_fingerprint
+                        provenance["source_option_chain_contracts"] = inner.get(
+                            "source_option_chain_contracts"
+                        )
+
                 thesis["evidence_provenance"] = provenance
                 inner["trade_thesis"] = thesis
                 candidate["payload"] = inner
