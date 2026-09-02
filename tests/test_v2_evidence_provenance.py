@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from alpha_spy.v2_runtime_repaired import evidence_provenance
+from alpha_spy.v2_runtime_repaired import _chain_fingerprint, evidence_provenance
 
 
 def _snapshot(at: datetime, *, source: str = "tradier_production_stream", integrity: str = "VERIFIED"):
@@ -19,6 +19,28 @@ def _chain(at: datetime, *, source: str = "tradier", integrity: str = "VERIFIED"
         "source": source,
         "integrity": integrity,
     }
+
+
+def _options(bid: float = 1.00):
+    return [
+        {
+            "symbol": "SPY260902C00600000",
+            "expiration": "2026-09-02",
+            "right": "C",
+            "strike": 600.0,
+            "bid": bid,
+            "ask": 1.02,
+            "bid_size": 50,
+            "ask_size": 40,
+            "open_interest": 1000,
+            "volume": 500,
+            "iv": 0.18,
+            "delta": 0.52,
+            "gamma": 0.04,
+            "theta": -0.20,
+            "vega": 0.02,
+        }
+    ]
 
 
 def test_fresh_verified_production_snapshot_and_chain_are_forward_evidence():
@@ -60,3 +82,12 @@ def test_unverified_chain_can_never_promote_itself():
     )
     assert result["evidence_class"] == "REPLAY_OR_UNVERIFIED"
     assert result["actual_chain"] is False
+
+
+def test_option_surface_fingerprint_is_order_stable_but_quote_sensitive():
+    first = _options()
+    second = list(reversed(first))
+    assert _chain_fingerprint(first) == _chain_fingerprint(second)
+
+    changed = _options(bid=0.99)
+    assert _chain_fingerprint(first) != _chain_fingerprint(changed)
