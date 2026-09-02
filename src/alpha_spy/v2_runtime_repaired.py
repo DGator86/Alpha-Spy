@@ -9,6 +9,7 @@ from . import v2_engine as engine_module
 from .timeutil import ET
 from .v2_hgb_vertical_repaired import build_hgb_vertical_candidate
 from .v2_lifecycle_survival import AlphaRiskSetLifecycleEngine
+from .v2_option_sanity import sane_option_surface
 from .v2_policy import CURRENT_POLICY_VERSION, POLICY_CONTRACT
 from .v2_regime_repaired import classify_regime_hierarchy
 from .v2_state_pq import generate_state_pq_candidates as _generate_state_pq_candidates
@@ -57,17 +58,19 @@ def _generate_candidates_with_control(
     *,
     optimizer_config=None,
 ):
+    spot = float(prediction.get("spy_price") or 0.0)
+    sane_options = sane_option_surface(options, spot)
     state_prediction, candidates = _generate_state_pq_candidates(
         config,
         prediction,
         beta_opportunity,
-        options,
+        sane_options,
         optimizer_config=optimizer_config,
     )
     control = build_hgb_vertical_candidate(
         state_prediction,
         beta_opportunity,
-        options,
+        sane_options,
     )
     if control is not None:
         payload = dict(control.get("payload") or {})
@@ -76,11 +79,12 @@ def _generate_candidates_with_control(
         control["payload"] = payload
         candidates.append(control)
 
-    fingerprint = _chain_fingerprint(options)
+    fingerprint = _chain_fingerprint(sane_options)
     for candidate in candidates:
         payload = dict(candidate.get("payload") or {})
         payload["source_option_chain_fingerprint"] = fingerprint
-        payload["source_option_chain_contracts"] = len(options)
+        payload["source_option_chain_contracts"] = len(sane_options)
+        payload["raw_option_chain_contracts"] = len(options)
         payload["policy_version"] = CURRENT_POLICY_VERSION
         candidate["payload"] = payload
     return state_prediction, candidates
@@ -201,7 +205,9 @@ class V2EngineService(engine_module.V2EngineService):
 
     def _annotate_open_position_evidence(self, snapshot: dict[str, Any]) -> None:
         chain, options = self.journal.latest_option_chain("SPY")
-        current_fingerprint = _chain_fingerprint(options)
+        spot = float(snapshot.get("spy_price") or 0.0)
+        sane_options = sane_option_surface(options, spot)
+        current_fingerprint = _chain_fingerprint(sane_options)
         base_provenance = evidence_provenance(
             snapshot,
             chain,
@@ -256,6 +262,9 @@ class V2EngineService(engine_module.V2EngineService):
                         provenance["verified_option_chain_fingerprint"] = current_fingerprint
                         provenance["source_option_chain_contracts"] = inner.get(
                             "source_option_chain_contracts"
+                        )
+                        provenance["raw_option_chain_contracts"] = inner.get(
+                            "raw_option_chain_contracts"
                         )
 
                 thesis["policy_version"] = CURRENT_POLICY_VERSION
