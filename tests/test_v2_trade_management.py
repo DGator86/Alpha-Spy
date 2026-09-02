@@ -27,7 +27,7 @@ def _thesis(playbook: str = "DIRECTIONAL_MOMENTUM"):
     }
 
 
-def _beta(regime: str = "DIRECTIONAL_UP"):
+def _beta(regime: str = "DIRECTIONAL_UP", *, successor_authority: bool = False):
     return {
         "regime_forecast": {
             "definable": True,
@@ -44,6 +44,7 @@ def _beta(regime: str = "DIRECTIONAL_UP"):
                 "TRANSITION": 0.05,
             },
         },
+        "lifecycle": {"calibration": {"successor_authority": successor_authority}},
         "predictive_state": {"p_big_15": 0.30},
         "hgb_direction": {"eligible": True, "direction": "BULLISH"},
     }
@@ -130,6 +131,50 @@ def test_directional_flip_bails_immediately():
     )
     assert result.action == BAIL
     assert result.should_exit is True
+
+
+def test_advisory_successor_probability_cannot_force_directional_exit():
+    beta = _beta("DIRECTIONAL_UP", successor_authority=False)
+    beta["hgb_direction"] = {"eligible": True, "direction": "BULLISH"}
+    beta["regime_forecast"]["most_likely_successor"] = "DIRECTIONAL_DOWN"
+    beta["regime_forecast"]["successor_probabilities"]["DIRECTIONAL_DOWN"] = 0.75
+    beta["regime_forecast"]["successor_probabilities"]["DIRECTIONAL_UP"] = 0.05
+    result = manage_trade(
+        _thesis(),
+        elapsed_minutes=6,
+        fair_pnl=2,
+        liquidation_pnl=0,
+        mfe=3,
+        quantity=1,
+        beta=beta,
+        current_iv=0.20,
+        entry_iv=0.20,
+    )
+    assert result.action == HOLD
+    assert result.should_exit is False
+    assert result.state["successor_authority"] is False
+
+
+def test_calibrated_successor_probability_can_force_directional_exit():
+    beta = _beta("DIRECTIONAL_UP", successor_authority=True)
+    beta["hgb_direction"] = {"eligible": False}
+    beta["regime_forecast"]["most_likely_successor"] = "DIRECTIONAL_DOWN"
+    beta["regime_forecast"]["successor_probabilities"]["DIRECTIONAL_DOWN"] = 0.75
+    beta["regime_forecast"]["successor_probabilities"]["DIRECTIONAL_UP"] = 0.05
+    result = manage_trade(
+        _thesis(),
+        elapsed_minutes=6,
+        fair_pnl=2,
+        liquidation_pnl=0,
+        mfe=3,
+        quantity=1,
+        beta=beta,
+        current_iv=0.20,
+        entry_iv=0.20,
+    )
+    assert result.action == BAIL
+    assert result.should_exit is True
+    assert result.state["successor_authority"] is True
 
 
 def test_range_iv_shock_invalidates_short_vol_even_before_price_stop():
