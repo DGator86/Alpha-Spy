@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import math
+from collections import defaultdict
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
+
+from scipy.stats import t as student_t
 
 _FORWARD_ACTUAL_CHAIN = "FORWARD_ACTUAL_CHAIN"
+_ET = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)
@@ -21,6 +27,7 @@ class PlaybookStatus:
     worst_drawdown: float
     lifecycle_error_rate: float | None
     forward_actual_chain_samples: int
+    forward_sessions: int
     forward_net_pnl: float
     forward_mean_pnl: float | None
     forward_win_rate: float | None
@@ -28,6 +35,11 @@ class PlaybookStatus:
     forward_average_process_score: float | None
     forward_worst_drawdown: float | None
     forward_lifecycle_error_rate: float | None
+    forward_session_mean_pnl: float | None
+    forward_session_win_rate: float | None
+    forward_session_profit_factor: float | None
+    forward_session_pnl_lcb90: float | None
+    forward_session_pnl_lcb95: float | None
     execution_eligible: bool
     reasons: tuple[str, ...]
 
@@ -94,12 +106,53 @@ def _is_forward_actual_chain(thesis: dict[str, Any]) -> bool:
     )
 
 
+def _session_key(opened_at: Any) -> str | None:
+    try:
+        parsed = datetime.fromisoformat(str(opened_at).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(_ET).date().isoformat()
+
+
+def _session_pnl(records: list[dict[str, Any]]) -> list[float]:
+    grouped: dict[str, float] = defaultdict(float)
+    for record in records:
+        key = record.get("session_key")
+        if key:
+            grouped[str(key)] += _num(record.get("pnl"))
+    return [grouped[key] for key in sorted(grouped)]
+
+
+def _one_sided_lower_bound(values: list[float], confidence: float) -> float | None:
+    """Student-t lower bound for the mean of independent session P&L.
+
+    The unit of inference is the trading session, not the trade. Multiple same-day
+    positions are clustered into one daily P&L before this calculation so a busy
+    session cannot manufacture sample size.
+    """
+    n = len(values)
+    if n < 2:
+        return None
+    mean = sum(values) / n
+    variance = sum((value - mean) ** 2 for value in values) / (n - 1)
+    if variance <= 1e-12:
+        return mean
+    critical = float(student_t.ppf(confidence, df=n - 1))
+    if not math.isfinite(critical):
+        return None
+    standard_error = math.sqrt(variance / n)
+    return mean - critical * standard_error
+
+
 def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any]]:
-    """Govern Step 16 from closed trades with explicit evidence lineage.
+    """Govern Step 16 using forward actual-chain evidence as the promotion set.
 
     Historical/synthetic/replay outcomes may reject or narrow a hypothesis, but
-    they cannot promote it. PROVISIONAL_REPEATABLE and VALIDATED_PLAYBOOK require
-    untouched forward trades built from fresh verified actual option chains.
+    they cannot promote it. Promotion additionally requires independent forward
+    sessions and a positive lower confidence bound on session P&L, not merely a
+    positive average over correlated trades.
     """
     with journal.session() as con:
         rows = con.execute(
@@ -132,6 +185,7 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
                 "pnl": _num(row["realized_pnl"]),
                 "review": review if isinstance(review, dict) else {},
                 "forward_actual_chain": _is_forward_actual_chain(thesis),
+                "session_key": _session_key(row["opened_at"]),
             }
         )
 
@@ -159,12 +213,24 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
         forward_process, forward_lifecycle_error = _review_metrics(forward_records)
         forward_drawdown = _drawdown(forward_pnl) if forward_samples else None
 
+        session_pnl = _session_pnl(forward_records)
+        forward_sessions = len(session_pnl)
+        session_mean = sum(session_pnl) / forward_sessions if forward_sessions else None
+        session_win = (
+            sum(value > 0.0 for value in session_pnl) / forward_sessions
+            if forward_sessions
+            else None
+        )
+        session_pf = _profit_factor(session_pnl) if forward_sessions else None
+        session_lcb90 = _one_sided_lower_bound(session_pnl, 0.90)
+        session_lcb95 = _one_sided_lower_bound(session_pnl, 0.95)
+
         reasons: list[str] = []
         if samples < 8:
             status = "EXPERIMENTAL"
             eligible = False
-            reasons.append("fewer_than_8_independent_closed_examples")
-        elif forward_samples < 20:
+            reasons.append("fewer_than_8_closed_examples")
+        elif forward_samples < 20 or forward_sessions < 10:
             poor_research_record = bool(
                 samples >= 20
                 and (
@@ -178,7 +244,10 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
                 reasons.append("research_record_is_poor_before_forward_promotion_gate")
             else:
                 status = "CHALLENGER"
-                reasons.append("fewer_than_20_forward_actual_chain_examples")
+                if forward_samples < 20:
+                    reasons.append("fewer_than_20_forward_actual_chain_examples")
+                if forward_sessions < 10:
+                    reasons.append("fewer_than_10_independent_forward_sessions")
             eligible = False
         elif forward_mean is None or forward_win is None:
             status = "CHALLENGER"
@@ -196,20 +265,41 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
             status = "NARROW_OR_RETIRE"
             eligible = False
             reasons.append("forward_lifecycle_assumptions_fail_too_often")
-        elif forward_samples < 40:
+        elif session_lcb90 is None or session_lcb90 <= 0.0:
+            status = "CHALLENGER"
+            eligible = False
+            reasons.append("forward_session_profit_not_positive_at_90pct_one_sided_confidence")
+        elif forward_samples < 40 or forward_sessions < 20:
             status = "PROVISIONAL_REPEATABLE"
             eligible = True
-            reasons.append("positive_20_plus_forward_actual_chain_record_requires_more_evidence")
+            reasons.append("positive_forward_record_passed_90pct_session_profit_bound")
+            if forward_samples < 40:
+                reasons.append("fewer_than_40_forward_actual_chain_examples")
+            if forward_sessions < 20:
+                reasons.append("fewer_than_20_independent_forward_sessions")
         else:
             pf_ok = forward_pf is None or forward_pf >= 1.20
-            if forward_mean > 0.0 and forward_win >= 0.50 and pf_ok:
+            session_pf_ok = session_pf is None or session_pf >= 1.20
+            confidence_ok = session_lcb95 is not None and session_lcb95 > 0.0
+            if (
+                forward_mean > 0.0
+                and forward_win >= 0.50
+                and pf_ok
+                and session_pf_ok
+                and confidence_ok
+            ):
                 status = "VALIDATED_PLAYBOOK"
                 eligible = True
-                reasons.append("forty_plus_forward_actual_chain_examples_with_positive_action_value")
+                reasons.append("forward_session_profit_positive_at_95pct_one_sided_confidence")
             else:
                 status = "CHALLENGER"
                 eligible = False
-                reasons.append("large_forward_sample_record_not_robust_enough_for_validation")
+                if not confidence_ok:
+                    reasons.append("forward_session_profit_not_positive_at_95pct_one_sided_confidence")
+                if not pf_ok or not session_pf_ok:
+                    reasons.append("forward_profit_factor_below_1_20")
+                if forward_win < 0.50:
+                    reasons.append("forward_win_rate_below_50pct")
 
         output[playbook] = PlaybookStatus(
             playbook=playbook,
@@ -223,6 +313,7 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
             worst_drawdown=_drawdown(pnl),
             lifecycle_error_rate=lifecycle_error,
             forward_actual_chain_samples=forward_samples,
+            forward_sessions=forward_sessions,
             forward_net_pnl=forward_net,
             forward_mean_pnl=forward_mean,
             forward_win_rate=forward_win,
@@ -230,6 +321,11 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
             forward_average_process_score=forward_process,
             forward_worst_drawdown=forward_drawdown,
             forward_lifecycle_error_rate=forward_lifecycle_error,
+            forward_session_mean_pnl=session_mean,
+            forward_session_win_rate=session_win,
+            forward_session_profit_factor=session_pf,
+            forward_session_pnl_lcb90=session_lcb90,
+            forward_session_pnl_lcb95=session_lcb95,
             execution_eligible=eligible,
             reasons=tuple(reasons),
         ).as_dict()
@@ -253,6 +349,7 @@ def governance_for(playbook: str, governance: dict[str, dict[str, Any]] | None) 
         "worst_drawdown": 0.0,
         "lifecycle_error_rate": None,
         "forward_actual_chain_samples": 0,
+        "forward_sessions": 0,
         "forward_net_pnl": 0.0,
         "forward_mean_pnl": None,
         "forward_win_rate": None,
@@ -260,6 +357,11 @@ def governance_for(playbook: str, governance: dict[str, dict[str, Any]] | None) 
         "forward_average_process_score": None,
         "forward_worst_drawdown": None,
         "forward_lifecycle_error_rate": None,
+        "forward_session_mean_pnl": None,
+        "forward_session_win_rate": None,
+        "forward_session_profit_factor": None,
+        "forward_session_pnl_lcb90": None,
+        "forward_session_pnl_lcb95": None,
         "execution_eligible": False,
         "reasons": ["no_closed_examples_yet"],
     }
