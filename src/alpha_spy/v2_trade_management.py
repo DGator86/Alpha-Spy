@@ -39,6 +39,24 @@ def _regime(beta: dict[str, Any] | None) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _successor_authority(beta: dict[str, Any] | None) -> bool:
+    """Return whether Step 4 has earned hard decision authority.
+
+    Entry already demotes successor direction until scored calibration clears the
+    lifecycle threshold. Settlement must obey the same boundary; otherwise an
+    advisory transition forecast could veto a position after being forbidden to
+    veto its entry.
+    """
+    beta = beta or {}
+    lifecycle = beta.get("lifecycle") or {}
+    if isinstance(lifecycle, dict):
+        calibration = lifecycle.get("calibration") or {}
+        if isinstance(calibration, dict) and "successor_authority" in calibration:
+            return bool(calibration.get("successor_authority"))
+    regime = _regime(beta)
+    return bool(regime.get("successor_authority"))
+
+
 def manage_trade(
     thesis: dict[str, Any],
     *,
@@ -72,6 +90,7 @@ def manage_trade(
     successor_probs = regime.get("successor_probabilities") or {}
     if not isinstance(successor_probs, dict):
         successor_probs = {}
+    successor_authoritative = _successor_authority(beta)
 
     playbook = str(thesis.get("playbook") or "")
     direction = str(thesis.get("direction") or "NEUTRAL")
@@ -113,6 +132,7 @@ def manage_trade(
         "entry_successor": entry_successor,
         "current_successor": successor,
         "successor_probabilities": successor_probs,
+        "successor_authority": successor_authoritative,
         "p_big_15": pbig15,
         "entry_iv": entry_iv,
         "current_iv": current_iv,
@@ -158,7 +178,7 @@ def manage_trade(
         opposite = hgb_eligible and hgb_direction and hgb_direction != direction
         opposite_successor = "DIRECTIONAL_DOWN" if direction == "BULLISH" else "DIRECTIONAL_UP"
         opposite_prob = _num(successor_probs.get(opposite_successor))
-        if opposite or opposite_prob >= 0.50:
+        if opposite or (successor_authoritative and opposite_prob >= 0.50):
             action = BAIL if fair_pnl >= 0 else SELL_FOR_LOSS
             return result(action, "directional_thesis_flipped", False, exit_=True)
         if persistence15 < 0.25 and elapsed_minutes >= 5.0:
@@ -186,7 +206,7 @@ def manage_trade(
             return result(BAIL, "mean_reversion_failed_regime_persisted", False, exit_=True)
 
     elif playbook == "REGIME_TRANSITION":
-        if successor != entry_successor and regime_conf >= 0.45:
+        if successor_authoritative and successor != entry_successor and regime_conf >= 0.45:
             action = BAIL if fair_pnl >= 0 else SELL_FOR_LOSS
             return result(action, "forecast_successor_regime_changed", False, exit_=True)
 
@@ -221,7 +241,12 @@ def manage_trade(
         action = TAKE_PROFIT if fair_pnl > 0 else SELL_FOR_LOSS
         return result(action, "hard_playbook_time_stop", fair_pnl > 0, exit_=True)
 
-    if current_regime != entry_regime and current_regime != "UNDEFINED" and successor == entry_successor:
+    if (
+        successor_authoritative
+        and current_regime != entry_regime
+        and current_regime != "UNDEFINED"
+        and successor == entry_successor
+    ):
         return result(ADJUST, "regime_changed_but_successor_thesis_survives", True, exit_=False)
 
     return result(HOLD, "thesis_intact_and_trade_on_schedule", True, exit_=False)
