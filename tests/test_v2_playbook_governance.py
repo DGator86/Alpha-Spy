@@ -12,8 +12,10 @@ def _insert_closed(
     pnl: float,
     process_score: float = 0.9,
     forward_actual_chain: bool = False,
+    session_index: int | None = None,
 ):
-    opened = datetime(2026, 8, 1, 14, 0, tzinfo=UTC) + timedelta(days=index)
+    day_index = index if session_index is None else session_index
+    opened = datetime(2026, 8, 1, 14, 0, tzinfo=UTC) + timedelta(days=day_index)
     provenance = (
         {
             "evidence_class": "FORWARD_ACTUAL_CHAIN",
@@ -122,7 +124,9 @@ def test_twenty_positive_forward_actual_chain_examples_become_provisional(tmp_pa
         )
     status = evaluate_playbooks(journal)["TEST_PLAYBOOK"]
     assert status["forward_actual_chain_samples"] == 20
+    assert status["forward_sessions"] == 20
     assert status["forward_mean_pnl"] > 0
+    assert status["forward_session_pnl_lcb90"] > 0
     assert status["status"] == "PROVISIONAL_REPEATABLE"
     assert status["execution_eligible"] is True
 
@@ -139,10 +143,51 @@ def test_forty_robust_forward_examples_can_validate(tmp_path):
         )
     status = evaluate_playbooks(journal)["TEST_PLAYBOOK"]
     assert status["forward_actual_chain_samples"] == 40
+    assert status["forward_sessions"] == 40
     assert status["forward_profit_factor"] is not None
     assert status["forward_profit_factor"] >= 1.20
+    assert status["forward_session_pnl_lcb95"] > 0
     assert status["status"] == "VALIDATED_PLAYBOOK"
     assert status["execution_eligible"] is True
+
+
+def test_many_correlated_trades_from_few_sessions_cannot_validate(tmp_path):
+    journal = Journal(tmp_path / "alpha.db")
+    for index in range(40):
+        _insert_closed(
+            journal,
+            index=index,
+            session_index=index // 8,
+            playbook="TEST_PLAYBOOK",
+            pnl=8.0,
+            forward_actual_chain=True,
+        )
+    status = evaluate_playbooks(journal)["TEST_PLAYBOOK"]
+    assert status["forward_actual_chain_samples"] == 40
+    assert status["forward_sessions"] == 5
+    assert status["status"] == "CHALLENGER"
+    assert status["execution_eligible"] is False
+    assert "fewer_than_10_independent_forward_sessions" in status["reasons"]
+
+
+def test_positive_mean_with_wide_uncertainty_does_not_validate(tmp_path):
+    journal = Journal(tmp_path / "alpha.db")
+    for index in range(40):
+        pnl = 100.0 if index % 5 in {0, 1, 2} else -110.0
+        _insert_closed(
+            journal,
+            index=index,
+            playbook="TEST_PLAYBOOK",
+            pnl=pnl,
+            forward_actual_chain=True,
+        )
+    status = evaluate_playbooks(journal)["TEST_PLAYBOOK"]
+    assert status["forward_mean_pnl"] > 0
+    assert status["forward_win_rate"] >= 0.50
+    assert status["forward_profit_factor"] >= 1.20
+    assert status["forward_session_pnl_lcb95"] <= 0
+    assert status["status"] == "CHALLENGER"
+    assert status["execution_eligible"] is False
 
 
 def test_negative_forward_action_value_is_narrowed_not_promoted(tmp_path):
