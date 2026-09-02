@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 from scipy.stats import t as student_t
 
+from .v2_policy import CURRENT_POLICY_VERSION
+
 _FORWARD_ACTUAL_CHAIN = "FORWARD_ACTUAL_CHAIN"
 _ET = ZoneInfo("America/New_York")
 
@@ -40,6 +42,7 @@ class PlaybookStatus:
     forward_session_profit_factor: float | None
     forward_session_pnl_lcb90: float | None
     forward_session_pnl_lcb95: float | None
+    policy_version: str
     execution_eligible: bool
     reasons: tuple[str, ...]
 
@@ -103,6 +106,8 @@ def _is_forward_actual_chain(thesis: dict[str, Any]) -> bool:
         isinstance(provenance, dict)
         and str(provenance.get("evidence_class") or "") == _FORWARD_ACTUAL_CHAIN
         and provenance.get("actual_chain") is True
+        and str(provenance.get("policy_version") or "") == CURRENT_POLICY_VERSION
+        and str(thesis.get("policy_version") or "") == CURRENT_POLICY_VERSION
     )
 
 
@@ -126,12 +131,7 @@ def _session_pnl(records: list[dict[str, Any]]) -> list[float]:
 
 
 def _one_sided_lower_bound(values: list[float], confidence: float) -> float | None:
-    """Student-t lower bound for the mean of independent session P&L.
-
-    The unit of inference is the trading session, not the trade. Multiple same-day
-    positions are clustered into one daily P&L before this calculation so a busy
-    session cannot manufacture sample size.
-    """
+    """Student-t lower bound for the mean of independent session P&L."""
     n = len(values)
     if n < 2:
         return None
@@ -147,12 +147,12 @@ def _one_sided_lower_bound(values: list[float], confidence: float) -> float | No
 
 
 def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any]]:
-    """Govern Step 16 using forward actual-chain evidence as the promotion set.
+    """Govern Step 16 using current-policy forward actual-chain evidence only.
 
     Historical/synthetic/replay outcomes may reject or narrow a hypothesis, but
-    they cannot promote it. Promotion additionally requires independent forward
-    sessions and a positive lower confidence bound on session P&L, not merely a
-    positive average over correlated trades.
+    they cannot promote it. Forward evidence from an older material policy version
+    is also excluded from promotion, because changing the trading policy changes
+    the statistical experiment.
     """
     with journal.session() as con:
         rows = con.execute(
@@ -245,9 +245,9 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
             else:
                 status = "CHALLENGER"
                 if forward_samples < 20:
-                    reasons.append("fewer_than_20_forward_actual_chain_examples")
+                    reasons.append("fewer_than_20_current_policy_forward_actual_chain_examples")
                 if forward_sessions < 10:
-                    reasons.append("fewer_than_10_independent_forward_sessions")
+                    reasons.append("fewer_than_10_current_policy_independent_forward_sessions")
             eligible = False
         elif forward_mean is None or forward_win is None:
             status = "CHALLENGER"
@@ -272,11 +272,11 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
         elif forward_samples < 40 or forward_sessions < 20:
             status = "PROVISIONAL_REPEATABLE"
             eligible = True
-            reasons.append("positive_forward_record_passed_90pct_session_profit_bound")
+            reasons.append("positive_current_policy_forward_record_passed_90pct_session_profit_bound")
             if forward_samples < 40:
-                reasons.append("fewer_than_40_forward_actual_chain_examples")
+                reasons.append("fewer_than_40_current_policy_forward_actual_chain_examples")
             if forward_sessions < 20:
-                reasons.append("fewer_than_20_independent_forward_sessions")
+                reasons.append("fewer_than_20_current_policy_independent_forward_sessions")
         else:
             pf_ok = forward_pf is None or forward_pf >= 1.20
             session_pf_ok = session_pf is None or session_pf >= 1.20
@@ -290,7 +290,7 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
             ):
                 status = "VALIDATED_PLAYBOOK"
                 eligible = True
-                reasons.append("forward_session_profit_positive_at_95pct_one_sided_confidence")
+                reasons.append("current_policy_forward_session_profit_positive_at_95pct_one_sided_confidence")
             else:
                 status = "CHALLENGER"
                 eligible = False
@@ -326,6 +326,7 @@ def evaluate_playbooks(journal, *, limit: int = 1000) -> dict[str, dict[str, Any
             forward_session_profit_factor=session_pf,
             forward_session_pnl_lcb90=session_lcb90,
             forward_session_pnl_lcb95=session_lcb95,
+            policy_version=CURRENT_POLICY_VERSION,
             execution_eligible=eligible,
             reasons=tuple(reasons),
         ).as_dict()
@@ -362,6 +363,7 @@ def governance_for(playbook: str, governance: dict[str, dict[str, Any]] | None) 
         "forward_session_profit_factor": None,
         "forward_session_pnl_lcb90": None,
         "forward_session_pnl_lcb95": None,
+        "policy_version": CURRENT_POLICY_VERSION,
         "execution_eligible": False,
-        "reasons": ["no_closed_examples_yet"],
+        "reasons": ["no_current_policy_closed_examples_yet"],
     }
