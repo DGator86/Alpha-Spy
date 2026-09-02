@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import math
 import uuid
+from collections import Counter
 from typing import Any
 
 import numpy as np
@@ -22,6 +24,10 @@ _HORIZONS = (5, 15, 30)
 _MAX_RISK_SET_AGE = 45
 _MIN_COMPLETED_EPISODES = 5
 _MIN_RISK_ROWS = 30
+_MIN_TRANSITION_SCORES = 100
+_MIN_TRANSITION_ACCURACY = 0.60
+_MIN_TRANSITION_SKILL_VS_MAJORITY = 0.05
+_MAX_LOG_LOSS_FRACTION_OF_UNIFORM = 0.95
 
 
 def _risk_features(row: dict[str, Any], age_minutes: float) -> np.ndarray:
@@ -133,6 +139,25 @@ def _weighted_remaining(
     return remaining, weights
 
 
+def successor_authority_from_calibration(calibration: dict[str, Any]) -> bool:
+    transition_scored = int(calibration.get("transition_scored_forecasts") or 0)
+    accuracy = calibration.get("transition_accuracy")
+    skill = calibration.get("transition_skill_vs_majority")
+    log_loss = calibration.get("transition_log_loss")
+    uniform_log_loss = calibration.get("transition_uniform_log_loss")
+    return bool(
+        transition_scored >= _MIN_TRANSITION_SCORES
+        and accuracy is not None
+        and float(accuracy) >= _MIN_TRANSITION_ACCURACY
+        and skill is not None
+        and float(skill) >= _MIN_TRANSITION_SKILL_VS_MAJORITY
+        and log_loss is not None
+        and uniform_log_loss is not None
+        and float(log_loss)
+        <= float(uniform_log_loss) * _MAX_LOG_LOSS_FRACTION_OF_UNIFORM
+    )
+
+
 class AlphaRiskSetLifecycleEngine(AlphaRegimeLifecycleEngine):
     """Blocked/risk-set survival lifecycle downstream of Alpha regime authority.
 
@@ -145,6 +170,66 @@ class AlphaRiskSetLifecycleEngine(AlphaRegimeLifecycleEngine):
     Beta is only a covariate. It cannot define Alpha's regime. Successor direction
     remains advisory until its own scored calibration earns authority.
     """
+
+    def _calibration(self, *, limit: int = 300) -> dict[str, Any]:
+        calibration = super()._calibration(limit=limit)
+        with self.journal.session() as con:
+            rows = con.execute(
+                """
+                SELECT score_json FROM v2_lifecycle_forecasts
+                WHERE score_json IS NOT NULL
+                ORDER BY scored_at DESC LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        transitions: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                score = json.loads(row["score_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(score, dict) and score.get("actual_successor") is not None:
+                transitions.append(score)
+
+        counts = Counter(str(score["actual_successor"]) for score in transitions)
+        transition_count = len(transitions)
+        majority_accuracy = (
+            max(counts.values()) / transition_count if transition_count else None
+        )
+        accuracy = (
+            sum(bool(score.get("transition_correct")) for score in transitions)
+            / transition_count
+            if transition_count
+            else None
+        )
+        assigned_probabilities = [
+            max(1e-6, min(1.0, _num(score.get("actual_successor_probability"))))
+            for score in transitions
+        ]
+        log_loss = (
+            sum(-math.log(probability) for probability in assigned_probabilities)
+            / len(assigned_probabilities)
+            if assigned_probabilities
+            else None
+        )
+        uniform_log_loss = math.log(max(2, len(REGIMES) - 1))
+        skill = (
+            float(accuracy) - float(majority_accuracy)
+            if accuracy is not None and majority_accuracy is not None
+            else None
+        )
+        return {
+            **calibration,
+            "transition_scored_forecasts": transition_count,
+            "transition_accuracy": accuracy,
+            "transition_majority_baseline_accuracy": majority_accuracy,
+            "transition_skill_vs_majority": skill,
+            "transition_log_loss": log_loss,
+            "transition_uniform_log_loss": uniform_log_loss,
+            "transition_log_loss_skill_vs_uniform": (
+                uniform_log_loss - log_loss if log_loss is not None else None
+            ),
+        }
 
     def forecast(
         self,
@@ -257,13 +342,7 @@ class AlphaRiskSetLifecycleEngine(AlphaRegimeLifecycleEngine):
         successor_conf = float(successor_candidates.get(successor, 0.0))
 
         calibration = self._calibration()
-        scored = int(calibration.get("scored_forecasts") or 0)
-        transition_accuracy = calibration.get("transition_accuracy")
-        successor_authority = bool(
-            scored >= 100
-            and transition_accuracy is not None
-            and float(transition_accuracy) >= 0.60
-        )
+        successor_authority = successor_authority_from_calibration(calibration)
         calibration = {
             **calibration,
             "risk_set_rows": risk_rows,
@@ -271,8 +350,10 @@ class AlphaRiskSetLifecycleEngine(AlphaRegimeLifecycleEngine):
             "fitted_horizons": sorted(models),
             "successor_authority": successor_authority,
             "successor_authority_threshold": {
-                "minimum_scored_forecasts": 100,
-                "minimum_transition_accuracy": 0.60,
+                "minimum_transition_scored_forecasts": _MIN_TRANSITION_SCORES,
+                "minimum_transition_accuracy": _MIN_TRANSITION_ACCURACY,
+                "minimum_skill_vs_majority": _MIN_TRANSITION_SKILL_VS_MAJORITY,
+                "maximum_log_loss_fraction_of_uniform": _MAX_LOG_LOSS_FRACTION_OF_UNIFORM,
             },
         }
 
@@ -311,7 +392,7 @@ class AlphaRiskSetLifecycleEngine(AlphaRegimeLifecycleEngine):
             "completed_prior_alpha_episodes_only",
             "blocked_discrete_time_risk_set_survival",
             "beta_is_covariate_not_regime_authority",
-            "successor_direction_advisory_until_calibrated",
+            "successor_direction_advisory_until_calibrated_above_baseline",
         ]
         if not definable:
             reasons.append("risk_set_lifecycle_support_not_yet_sufficient")
