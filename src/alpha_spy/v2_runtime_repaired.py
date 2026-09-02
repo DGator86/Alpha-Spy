@@ -7,7 +7,7 @@ from typing import Any
 
 from . import v2_engine as engine_module
 from .timeutil import ET
-from .v2_hgb_vertical import build_hgb_vertical_candidate
+from .v2_hgb_vertical_repaired import build_hgb_vertical_candidate
 from .v2_lifecycle_survival import AlphaRiskSetLifecycleEngine
 from .v2_regime_repaired import classify_regime_hierarchy
 from .v2_state_pq import generate_state_pq_candidates as _generate_state_pq_candidates
@@ -42,12 +42,7 @@ def _chain_fingerprint(options: list[dict[str, Any]]) -> str:
     """Stable SHA-256 over the actual option surface consumed by candidate design."""
     normalized = []
     for row in options:
-        normalized.append(
-            {
-                field: row.get(field)
-                for field in _CHAIN_FINGERPRINT_FIELDS
-            }
-        )
+        normalized.append({field: row.get(field) for field in _CHAIN_FINGERPRINT_FIELDS})
     normalized.sort(key=lambda row: str(row.get("symbol") or ""))
     encoded = json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()
@@ -96,13 +91,7 @@ def evidence_provenance(
     now: datetime,
     maximum_age_seconds: float = 180.0,
 ) -> dict[str, Any]:
-    """Classify whether a trade is untouched forward evidence using a real chain.
-
-    Historical replay is valuable research, but it must never be able to promote
-    itself into Step-16 execution authority. Forward evidence requires a fresh
-    production-stream market snapshot and a fresh verified Tradier option chain.
-    Anything else remains replay/unverified even if its simulated P&L is excellent.
-    """
+    """Classify whether a trade is untouched forward evidence using a real chain."""
     detail: dict[str, Any] = {
         "evidence_class": _REPLAY_OR_UNVERIFIED,
         "actual_chain": False,
@@ -161,10 +150,6 @@ def evidence_provenance(
     }
 
 
-# Keep the mature V2 service implementation, but repair the authorities exposed
-# by chronological replay. Module globals are resolved at runtime by the base
-# service, so these substitutions affect the inherited service without duplicating
-# its large orchestration method.
 engine_module.classify_regime_hierarchy = classify_regime_hierarchy
 engine_module.AlphaRegimeLifecycleEngine = AlphaRiskSetLifecycleEngine
 engine_module.generate_state_pq_candidates = _generate_candidates_with_control
@@ -190,10 +175,6 @@ class V2EngineService(engine_module.V2EngineService):
         payload = candidate.get("payload") or {}
         if str(payload.get("authority") or "") != _HGB_AUTHORITY:
             return ok, detail
-
-        # The validated HGB control lane is not authorized by synthetic/state P/Q
-        # expected value. Broker preview still has full authority over actual fee
-        # and maximum-loss tolerability.
         if "preview_roundtrip_fee_estimate" not in detail:
             return ok, {
                 **detail,
@@ -202,10 +183,7 @@ class V2EngineService(engine_module.V2EngineService):
             }
         roundtrip = float(detail.get("preview_roundtrip_fee_estimate") or 0.0)
         preview_risk = float(detail.get("preview_max_loss_dollars") or 0.0)
-        risk_limit = min(
-            100.0,
-            float(self.config.risk.maximum_trade_risk_dollars),
-        )
+        risk_limit = min(100.0, float(self.config.risk.maximum_trade_risk_dollars))
         fee_risk_ok = roundtrip <= 5.0 and preview_risk <= risk_limit + 1e-9
         return fee_risk_ok, {
             **detail,
@@ -279,9 +257,7 @@ class V2EngineService(engine_module.V2EngineService):
             self._annotate_open_position_evidence(snapshot)
             stamp = engine_module._parse_time(snapshot["captured_at"])
             session_date = stamp.astimezone(ET).date().isoformat()
-            directional_key = "|".join(
-                (session_date, PLAYBOOK_DIRECTIONAL, "FIRST_SETUP")
-            )
+            directional_key = "|".join((session_date, PLAYBOOK_DIRECTIONAL, "FIRST_SETUP"))
             if self.journal.get_control("last_v2_agent_setup_key") == directional_key:
                 self.journal.set_control(_DIRECTIONAL_DATE_CONTROL, session_date)
         return result
