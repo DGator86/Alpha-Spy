@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -32,10 +33,7 @@ def _probability_map(payload: dict[str, Any], *, default_horizon: int = 15) -> d
                 horizon = int(str(raw_horizon).lower().replace("m", ""))
             except ValueError:
                 continue
-            if isinstance(row, dict):
-                value = row.get("probability_up")
-            else:
-                value = None
+            value = row.get("probability_up") if isinstance(row, dict) else None
             try:
                 if value is not None:
                     out[horizon] = float(value)
@@ -141,14 +139,10 @@ def beta_state_from_runtime(
     probability_up = _probability_map(mtf)
     expected_return_bps = _return_map(mtf)
     if isinstance(hgb, dict) and hgb.get("probability_up") is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             probability_up[15] = float(hgb["probability_up"])
-        except (TypeError, ValueError):
-            pass
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             expected_return_bps[15] = float(hgb.get("expected_return_bps") or 0.0)
-        except (TypeError, ValueError):
-            pass
 
     model_version = str(
         (hgb.get("model_version") if isinstance(hgb, dict) else None)
