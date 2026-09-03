@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from spy_platform.contracts import AlphaState, BetaState, ModelMeta
 from spy_platform.delta import compile_delta_state
+from spy_platform.equivalence import compare_alpha_states
 from spy_platform.gamma import build_gamma_state
+from spy_platform.raw_market import MarketEvent, MarketFrame
 from spy_platform.streams import build_delta_streams
 
 
@@ -133,3 +135,32 @@ def test_delta_quality_is_component_visible():
     assert quality["models"]["beta"] == 0.98
     assert "gamma" in quality["models"]
     assert quality["composite"] <= 1.0
+
+
+def test_raw_event_identity_is_deterministic_and_frame_is_immutable():
+    kwargs = {
+        "source": "tradier",
+        "event_type": "TIMESALE",
+        "symbol": "SPY",
+        "event_timestamp": "2026-09-03T14:42:00Z",
+        "received_timestamp": "2026-09-03T14:42:00.050Z",
+        "sequence": 1234,
+        "payload": {"price": 652.25, "size": 100},
+    }
+    first = MarketEvent.create(**kwargs)
+    second = MarketEvent.create(**kwargs)
+    assert first.event_id == second.event_id
+    frame = MarketFrame.from_events(as_of="2026-09-03T14:42:00Z", events=[first])
+    assert frame.event_ids == (first.event_id,)
+    assert frame.symbols == ("SPY",)
+    assert frame.immutable is True
+
+
+def test_migration_equivalence_rejects_silent_alpha_change():
+    baseline = _alpha(0.65)
+    unchanged = _alpha(0.65)
+    changed = _alpha(0.66)
+    assert compare_alpha_states(baseline, unchanged).equivalent is True
+    result = compare_alpha_states(baseline, changed)
+    assert result.equivalent is False
+    assert any("probability_up[15]" in item for item in result.mismatches)
