@@ -19,6 +19,7 @@ EconomicRole = Literal[
 ]
 
 AssertionRole = QuantRole | EconomicRole
+DirectionalBias = Literal["BULLISH", "BEARISH", "NEUTRAL", "NONE"]
 
 QUANT_STREAM_ACCESS: dict[QuantRole, tuple[str, ...]] = {
     "DIRECTION_MOMENTUM": (
@@ -77,6 +78,10 @@ class AnalystAssertion:
     confidence: float
     horizon_minutes: int | None
     evidence: tuple[str, ...]
+    directional_bias: DirectionalBias = "NONE"
+    probability_up: float | None = None
+    expected_return_bps: float | None = None
+    expected_abs_move_bps: float | None = None
     contradictions: tuple[str, ...] = ()
     invalidation: tuple[str, ...] = ()
     source_state_id: str | None = None
@@ -99,6 +104,8 @@ class ManagerView:
     preferred_condition: str | None
     invalidation: tuple[str, ...]
     assertion_ids: tuple[str, ...]
+    probability_up: float | None = None
+    expected_return_bps: float | None = None
     authority: str = "synthesis_only_no_execution_authority"
 
     def as_dict(self) -> dict[str, Any]:
