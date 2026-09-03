@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
+from spy_platform.assertions import AnalystAssertion
 from spy_platform.contracts import AlphaState, BetaState, ModelMeta
 from spy_platform.delta import compile_delta_state
 from spy_platform.equivalence import compare_alpha_states
 from spy_platform.gamma import build_gamma_state
 from spy_platform.raw_market import MarketEvent, MarketFrame
+from spy_platform.routing import route_assertion, validate_quant_stream_request
 from spy_platform.streams import build_delta_streams
 
 
@@ -164,3 +168,32 @@ def test_migration_equivalence_rejects_silent_alpha_change():
     result = compare_alpha_states(baseline, changed)
     assert result.equivalent is False
     assert any("probability_up[15]" in item for item in result.mismatches)
+
+
+def test_quant_and_economic_assertions_have_separate_manager_routes():
+    quant = AnalystAssertion(
+        assertion_id="Q-1",
+        timestamp="2026-09-03T14:42:00Z",
+        role="MARKET_INTERNALS",
+        thesis="Breadth confirms the observed index move.",
+        confidence=0.75,
+        horizon_minutes=15,
+        evidence=("delta/breadth",),
+    )
+    econ = AnalystAssertion(
+        assertion_id="E-1",
+        timestamp="2026-09-03T14:42:00Z",
+        role="RATES_FED",
+        thesis="Rates impulse is neutral.",
+        confidence=0.70,
+        horizon_minutes=30,
+        evidence=("treasury_curve",),
+    )
+    assert route_assertion(quant).destination == "QUANT_MANAGER"
+    assert route_assertion(econ).destination == "ECONOMIST"
+
+
+def test_quant_roles_cannot_read_unassigned_delta_streams():
+    validate_quant_stream_request("MARKET_INTERNALS", {"breadth", "flow", "data_quality"})
+    with pytest.raises(PermissionError):
+        validate_quant_stream_request("MARKET_INTERNALS", {"options_positioning"})
