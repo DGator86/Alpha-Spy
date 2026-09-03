@@ -36,6 +36,7 @@ dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.8,<1", "tabulate>=0.9,<1"]
 alpha-spy = "alpha_spy.cli:main"
 spy-alpha = "alpha_spy.research.cli:app"
 spy-alpha-dashboard = "alpha_spy.dashboard.cli:main"
+spy-delta = "spy_platform.api:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -116,4 +117,4 @@ extend-immutable-calls = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["alpha_spy", "alpha_spy.dashboard", "alpha_spy.research"]
+known-first-party = ["alpha_spy", "alpha_spy.dashboard", "alpha_spy.research", "spy_platform"]
