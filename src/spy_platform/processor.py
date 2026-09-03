@@ -9,8 +9,8 @@ from alpha_spy.db import Journal
 
 from .adapters import alpha_state_from_runtime, beta_state_from_runtime
 from .contracts import DeltaState
-from .delta import compile_delta_state
 from .gamma import build_gamma_state
+from .model_bus import ModelStateBus
 from .streams import build_delta_streams
 
 
@@ -18,8 +18,9 @@ class DeltaProcessor:
     """Read-only bridge from the existing Alpha/Beta runtimes into Delta.
 
     The processor reads persisted Alpha state, reads Beta's published state over HTTP,
-    derives Gamma from archived option chains, and compiles a Delta snapshot.  It never
-    imports Alpha execution/risk modules and has no broker client.
+    derives Gamma from archived option chains, and publishes all three to a synchronized
+    model bus before Delta compilation. It never imports Alpha execution/risk modules
+    and has no broker client.
     """
 
     def __init__(
@@ -28,11 +29,12 @@ class DeltaProcessor:
         *,
         beta_state_url: str = "http://127.0.0.1:8790/api/state",
         beta_timeout_seconds: float = 2.5,
+        max_model_clock_skew_seconds: float = 120.0,
     ) -> None:
         self.journal = journal
         self.beta_state_url = beta_state_url
         self.beta_timeout_seconds = beta_timeout_seconds
-        self._previous: DeltaState | None = None
+        self.bus = ModelStateBus(max_clock_skew_seconds=max_model_clock_skew_seconds)
 
     def _alpha_prediction(self) -> tuple[dict[str, Any], dict[str, Any]]:
         predictions = self.journal.latest_predictions_by_horizon()
@@ -118,9 +120,10 @@ class DeltaProcessor:
             spot=float(snapshot.get("spy_price") or 0.0),
             chains=self._gamma_chains(),
         )
-        delta = compile_delta_state(alpha, beta, gamma, previous=self._previous)
-        self._previous = delta
-        return delta
+        self.bus.publish_alpha(alpha)
+        self.bus.publish_beta(beta)
+        self.bus.publish_gamma(gamma)
+        return self.bus.compile()
 
     def streams(self) -> dict[str, dict[str, Any]]:
         return build_delta_streams(self.build())
