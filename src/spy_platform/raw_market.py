@@ -61,7 +61,7 @@ class MarketEvent:
         received_timestamp: datetime | str,
         payload: dict[str, Any],
         sequence: int | str | None = None,
-    ) -> "MarketEvent":
+    ) -> MarketEvent:
         event_time = _iso(event_timestamp)
         receive_time = _iso(received_timestamp)
         return cls(
@@ -104,7 +104,7 @@ class MarketFrame:
         as_of: datetime | str,
         events: list[MarketEvent],
         quality: dict[str, Any] | None = None,
-    ) -> "MarketFrame":
+    ) -> MarketFrame:
         stamp = _iso(as_of)
         event_ids = tuple(sorted(event.event_id for event in events))
         material = json.dumps(
