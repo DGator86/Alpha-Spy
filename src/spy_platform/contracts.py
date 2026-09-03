@@ -8,10 +8,7 @@ ModelName = Literal["ALPHA", "BETA", "GAMMA"]
 
 
 def _utc_iso(value: datetime | str) -> str:
-    if isinstance(value, str):
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    else:
-        parsed = value
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")) if isinstance(value, str) else value
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
@@ -35,7 +32,7 @@ class ModelMeta:
         model_version: str,
         data_quality: float,
         source_age_seconds: float = 0.0,
-    ) -> "ModelMeta":
+    ) -> ModelMeta:
         return cls(
             model=model,
             timestamp=_utc_iso(timestamp),
