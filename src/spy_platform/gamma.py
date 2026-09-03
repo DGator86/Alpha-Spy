@@ -3,8 +3,9 @@ from __future__ import annotations
 import math
 import statistics
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import UTC, datetime
-from typing import Any, Iterable
+from typing import Any
 
 from .contracts import GammaState, ModelMeta
 
@@ -23,10 +24,7 @@ def _median(values: Iterable[float]) -> float | None:
 
 
 def _parse_timestamp(value: datetime | str) -> datetime:
-    if isinstance(value, datetime):
-        parsed = value
-    else:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
@@ -82,7 +80,6 @@ def _gamma_proxy(rows: list[dict[str, Any]], spot: float) -> dict[str, Any]:
         right = _right(row)
         if gamma is None or oi is None or strike is None or oi <= 0 or right not in {"C", "P"}:
             continue
-        # Transparent call-positive/put-negative OI proxy.  This is not a dealer inventory book.
         signed = (1.0 if right == "C" else -1.0) * gamma * oi * 100.0 * spot * spot * 0.01
         by_strike[strike] += signed
         gross += abs(signed)
@@ -123,7 +120,7 @@ def build_gamma_state(
 ) -> GammaState:
     """Compile observable derivatives state without selecting a trade.
 
-    `chains` accepts multiple expirations.  Each item should contain `expiration`
+    `chains` accepts multiple expirations. Each item should contain `expiration`
     and `options`; rows use Alpha's normalized option fields when available.
     """
     now = _parse_timestamp(timestamp)
